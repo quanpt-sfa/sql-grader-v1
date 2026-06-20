@@ -455,6 +455,10 @@ def run_view_testing(
         stud_v_name, resolve_error = _find_student_view(ans_v_name, stud_view_map)
 
         if resolve_error:
+            if resolve_error == "VIEW_NOT_FOUND":
+                # Omit structural view missing from view-test report
+                logger.info(f"Omitted missing view '{ans_v_name}' from view-test report for '{submission_id}'.")
+                continue
             status = resolve_error
             logger.warning(f"View '{ans_v_name}' → {status} for student '{submission_id}'.")
             result = _build_result(

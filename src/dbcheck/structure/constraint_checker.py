@@ -28,22 +28,52 @@ def is_surrogate_column(col_name: str, table_name: str, is_identity: int, config
         return True
         
     col_name_l = col_name.lower().strip()
-    if col_name_l == "id" or col_name_l.endswith("_id"):
+    if col_name_l == "id":
         return True
         
     table_name_l = table_name.lower().strip()
+    
+    # Resolve canonical table name if it's physical
+    canon_t = table_name
+    if hasattr(config, "schema") and config.schema:
+        from dbcheck.snapshot.normalizer import NameNormalizer
+        try:
+            norm = NameNormalizer(config)
+            canon_t = norm.map_table(table_name)["answer_table"] or table_name
+        except Exception:
+            pass
+            
+    canon_t_l = canon_t.lower().strip()
+    
+    # Get all valid name variants for this table
+    table_variants = {table_name_l, canon_t_l}
+    for name in list(table_variants):
+        clean = re.sub(r'[\s_–\-]', '', name)
+        table_variants.add(clean)
+        clean_nodigits = re.sub(r'^\d+[\s\.\-_]*', '', clean)
+        table_variants.add(clean_nodigits)
+        
+    # Check resolved patterns
     for pattern in kg.surrogate_key_patterns:
         pattern_l = pattern.lower().strip()
         if pattern_l == "id":
             if col_name_l == "id":
                 return True
         else:
-            resolved = pattern_l.replace("{table}", table_name_l)
-            if col_name_l == resolved:
+            for variant in table_variants:
+                resolved = pattern_l.replace("{table}", variant)
+                if col_name_l == resolved:
+                    return True
+                resolved_clean = pattern_l.replace("{table}", re.sub(r'[\s_–\-]', '', variant))
+                if col_name_l == resolved_clean:
+                    return True
+                    
+    # Strict fallback for id/_id endings
+    if col_name_l.endswith("_id") or col_name_l.endswith("id"):
+        for variant in table_variants:
+            if len(variant) > 2 and variant in col_name_l:
                 return True
-            resolved_clean = pattern_l.replace("{table}", re.sub(r'[\s_–\-]', '', table_name_l))
-            if col_name_l == resolved_clean:
-                return True
+                
     return False
 
 def suggests_relationship(stud_child_t: str, ans_parent_t: str, ans_parent_col: str, stud_cols: List[Dict[str, Any]], config: Any) -> bool:
@@ -72,6 +102,20 @@ def get_raw_col_name(table_canon: str, col_canon: str, cols_list: List[Dict[str,
             if c.get("column_name_canonical") == col_canon:
                 return c.get("column_name", "")
     return col_canon
+
+
+def is_header_currency_accepted(child_t: str, parent_t: str, config: Any) -> bool:
+    if parent_t != "LoaiTien":
+        return False
+    if child_t not in ("MuaHang", "TraTien"):
+        return False
+    if not config or not hasattr(config, "schema"):
+        return False
+    cols_by_table = getattr(config.schema, "columns_by_table", {})
+    child_cols = cols_by_table.get(child_t, {})
+    if "MaLoaiTien" in child_cols:
+        return True
+    return False
 
 
 def match_constraints(
@@ -435,6 +479,27 @@ def _match_constraints_adequacy(
         # If there's an expected relationship for child table, but not to this parent table
         child_expected_parents = {p for c, p in expected_relations if c == s_child_t}
         if child_expected_parents and s_parent_t not in child_expected_parents:
+            # Check if config accepts this currency at header
+            if is_header_currency_accepted(s_child_t, s_parent_t, config):
+                fk_row = {
+                    "submission_id": sfk.get("submission_id", "student"),
+                    "fk_name": sfk.get("fk_name", ""),
+                    "answer_child_table": s_child_t,
+                    "answer_parent_table": s_parent_t,
+                    "answer_child_columns": "MaLoaiTien",
+                    "answer_parent_columns": "MaLoaiTien",
+                    "student_child_table": accepted_table_pairs.get(s_child_t) or s_child_t,
+                    "student_parent_table": accepted_table_pairs.get(s_parent_t) or s_parent_t,
+                    "student_child_columns": sfk.get("parent_column_canonical", ""),
+                    "student_parent_columns": sfk.get("referenced_column_canonical", ""),
+                    "fk_status": "FK_RELATIONSHIP_MATCH",
+                    "fk_reason": "Header currency relationship accepted per configuration.",
+                    "fk_severity": "info"
+                }
+                fk_relationship_results.append(fk_row)
+                counts["fk_relationship_match_count"] += 1
+                continue
+
             # Report Wrong Target
             fk_row = {
                 "submission_id": sfk.get("submission_id", "student"),

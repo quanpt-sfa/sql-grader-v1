@@ -239,3 +239,108 @@ def test_fk_implied_review_required(base_config_data):
     )
     assert fk_report[0]["fk_status"] == "FK_IMPLIED_REVIEW_REQUIRED"
     assert counts["fk_review_required_count"] == 1
+
+
+def test_priority_column_selection(base_config_data, tmp_path):
+    # Tests that when multiple student columns match the same canonical answer column PhieuMuaHang,
+    # the best one is chosen (PMH > PhieuMH > SoHD > MaHD) and the others are demoted.
+    from unittest.mock import patch
+    from pathlib import Path
+
+    base_config_data["schema"]["key_grading"]["natural_key_aliases"] = {
+        "ChiTietMuaHang": {
+            "PhieuMuaHang": ["PMH", "PhieuMH", "SoHD", "MaHD"]
+        }
+    }
+    config = AssignmentConfig(base_config_data)
+    
+    ans_snap = {
+        "tables": [{"table_name": "ChiTietMuaHang", "table_name_canonical": "ChiTietMuaHang"}],
+        "columns": [
+            {"table_name": "ChiTietMuaHang", "table_name_canonical": "ChiTietMuaHang", "column_name": "PhieuMuaHang", "column_name_canonical": "PhieuMuaHang", "data_type": "int", "is_identity": 0}
+        ],
+        "primary_keys": [],
+        "foreign_keys": [],
+        "views": [],
+        "view_columns": [],
+        "unique_constraints": []
+    }
+    
+    stud_snap = {
+        "tables": [{"table_name": "ChiTietMuaHang"}],
+        "columns": [
+            {"table_name": "ChiTietMuaHang", "column_name": "PhieuMH", "data_type": "int", "is_identity": 0},
+            {"table_name": "ChiTietMuaHang", "column_name": "PMH", "data_type": "int", "is_identity": 0},
+            {"table_name": "ChiTietMuaHang", "column_name": "SoHD", "data_type": "int", "is_identity": 0},
+            {"table_name": "ChiTietMuaHang", "column_name": "MaHD", "data_type": "int", "is_identity": 0}
+        ],
+        "primary_keys": [],
+        "foreign_keys": [],
+        "views": [],
+        "view_columns": [],
+        "unique_constraints": []
+    }
+    
+    def mock_read(path):
+        if "answer" in str(path):
+            return ans_snap
+        else:
+            return stud_snap
+            
+    report_file = tmp_path / "structure_report.csv"
+    with patch("dbcheck.structure.structure_reporter.read_full_snapshot", side_effect=mock_read):
+        run_structure_comparison(Path("answer_dir"), Path("student_dir"), report_file, config)
+        
+    col_mapping_file = tmp_path / "column_mapping_report.csv"
+    assert col_mapping_file.exists()
+    
+    import csv
+    with open(col_mapping_file, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        mappings = list(reader)
+        
+    assert len(mappings) == 4
+    
+    pmh_map = next((m for m in mappings if m["student_column"] == "PMH"), None)
+    assert pmh_map is not None
+    assert pmh_map["answer_column"] == "PhieuMuaHang"
+    assert pmh_map["match_status"].startswith("COLUMN_MATCHED")
+    
+    for col in ["PhieuMH", "SoHD", "MaHD"]:
+        m = next((m for m in mappings if m["student_column"] == col), None)
+        assert m is not None
+        assert m["match_status"] == "COLUMN_UNMAPPED"
+        assert m["match_method"] == "demoted_duplicate"
+        assert m["answer_column"] == ""
+        
+    with open(report_file, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        results = list(reader)
+        
+    unmapped_results = [r for r in results if r["status"] == "EXTRA_REVIEW"]
+    assert len(unmapped_results) == 3
+    for r in unmapped_results:
+        assert r["severity"] == "warning"
+        assert "Unmapped column" in r["message"]
+
+def test_surrogate_foreign_key_safety(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    # LoaiTien_ID in ChiTietTraTien should NOT be considered a surrogate column of ChiTietTraTien
+    assert is_surrogate_column("LoaiTien_ID", "ChiTietTraTien", 0, config) is False
+    assert is_surrogate_column("LoaiTienID", "ChiTietTraTien", 0, config) is False
+    # ChiTietTraTienID in ChiTietTraTien SHOULD be considered a surrogate column of ChiTietTraTien
+    assert is_surrogate_column("ChiTietTraTienID", "ChiTietTraTien", 0, config) is True
+    assert is_surrogate_column("ChiTietTraTien_ID", "ChiTietTraTien", 0, config) is True
+
+def test_header_currency_accepted(base_config_data):
+    # Setup columns_by_table in config to allow MaLoaiTien under MuaHang
+    base_config_data["schema"]["aliases"]["columns"]["by_table"] = {
+        "MuaHang": {
+            "MaLoaiTien": ["LoaiTien", "MaTien"]
+        }
+    }
+    config = AssignmentConfig(base_config_data)
+    from dbcheck.structure.constraint_checker import is_header_currency_accepted
+    assert is_header_currency_accepted("MuaHang", "LoaiTien", config) is True
+    assert is_header_currency_accepted("TraTien", "LoaiTien", config) is False
+

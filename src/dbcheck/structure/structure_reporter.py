@@ -196,20 +196,44 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
             table_col_mappings.append(col_res)
 
         # One-to-One column constraint
-        col_counts: Dict[str, int] = {}
+        by_answer_col = {}
         for cm in table_col_mappings:
-            if cm["match_status"].startswith("COLUMN_MATCHED"):
+            if cm["match_status"].startswith("COLUMN_MATCHED") and cm.get("answer_column"):
                 canon_c = cm["answer_column"]
-                col_counts[canon_c] = col_counts.get(canon_c, 0) + 1
+                by_answer_col.setdefault(canon_c, []).append(cm)
 
-        for cm in table_col_mappings:
-            if cm["match_status"].startswith("COLUMN_MATCHED"):
-                canon_c = cm["answer_column"]
-                if col_counts[canon_c] > 1:
-                    cm["match_status"] = "COLUMN_AMBIGUOUS"
-                    cm["match_method"] = "multiple_matches"
-                    cm["review_required"] = True
+        method_priority = {
+            "table_alias": 5,
+            "natural_key_alias": 4,
+            "exact": 3,
+            "global_alias": 2,
+            "abbreviation": 1,
+            "fuzzy": 0
+        }
+
+        def get_name_priority(col_name: str, ans_col: str) -> int:
+            normalized_name = col_name.lower().strip().replace("_", "").replace(" ", "")
+            if ans_col == "PhieuMuaHang":
+                pref = ["pmh", "phieumh", "sohd", "mahd"]
+                if normalized_name in pref:
+                    return len(pref) - pref.index(normalized_name)
+            return 0
+
+        for canon_c, mappings in by_answer_col.items():
+            if len(mappings) > 1:
+                mappings.sort(
+                    key=lambda x: (
+                        x.get("match_score", 0.0),
+                        method_priority.get(x.get("match_method", ""), -1),
+                        get_name_priority(x.get("student_column", ""), canon_c)
+                    ),
+                    reverse=True
+                )
+                for cm in mappings[1:]:
+                    cm["match_status"] = "COLUMN_UNMAPPED"
                     cm["answer_column"] = ""
+                    cm["review_required"] = True
+                    cm["match_method"] = "demoted_duplicate"
 
         # Type comparison using type_compatibility module
         for cm in table_col_mappings:
@@ -270,7 +294,7 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
 
         for cm in table_col_mappings:
             if cm["match_status"] == "COLUMN_UNMAPPED":
-                if all_expected_mapped:
+                if all_expected_mapped and cm.get("match_method") != "demoted_duplicate":
                     cm["match_status"] = "COLUMN_EXTRA_STUDENT"
                     cm["review_required"] = False
 
@@ -516,8 +540,8 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                     "component": "column",
                     "answer_object": "",
                     "student_object": stud_obj,
-                    "status": "MISSING",
-                    "severity": "high",
+                    "status": "EXTRA_REVIEW",
+                    "severity": "warning",
                     "message": f"Unmapped column '{cm.get('student_column','')}' in table '{cm['student_table']}'",
                     "evidence": ""
                 })

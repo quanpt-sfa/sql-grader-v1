@@ -181,7 +181,11 @@ def compile_summary(run_dir: Path) -> Path:
                         elif s_status == "PASS":
                             row["struct_pass_count"] += 1
                         elif s_status == "MISSING":
-                            row["struct_missing_count"] += 1
+                            if s_row.get("component") == "view":
+                                row["view_missing_count"] += 1
+                                row["view_required_count"] += 1
+                            else:
+                                row["struct_missing_count"] += 1
                         elif s_status == "EXTRA":
                             row["struct_extra_count"] += 1
                         elif s_status == "TYPE_MISMATCH":
@@ -224,6 +228,9 @@ def compile_summary(run_dir: Path) -> Path:
                         row["view_test_status"] = "OK"
             except Exception as e:
                 logger.warning(f"Error reading view report for '{sub_id}': {e}")
+
+        if row["view_missing_count"] > 0 and not row["view_test_status"]:
+            row["view_test_status"] = "VIEW_NOT_FOUND"
 
         summary_rows.append(row)
 
