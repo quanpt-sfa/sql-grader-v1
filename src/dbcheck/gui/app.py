@@ -163,9 +163,8 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("SQL Server Assignment Grader GUI")
-        self.root.geometry("1000 edged 850")
-        self.root.minimum_size = (900, 750)
         self.root.geometry("1000x850")
+        self.root.minsize(900, 750)
 
         # Process management variables
         self.active_process: Optional[subprocess.Popen] = None
