@@ -75,7 +75,7 @@ schema:
       by_table:
         HangHoa:
           MaHangHoa: [MaHang, MaHTK, ProductID]
-          TenHangHoa: [TenHang, TenHTK, ProductName]
+          TenHangHoa: [TenHang, TenHTK, ProductName, HangHoa, "Hàng Hóa", "Tên hàng hóa", "Sản phẩm"]
         LoaiTien:
           MaLoaiTien: [MaTien, LoaiTien, CurrencyID]
           TenLoaiTien: [TenTien, TenLoaiTien, CurrencyName]
@@ -90,7 +90,7 @@ schema:
           MaLoaiTien: [LoaiTien, MaTien]
         ChiTietMuaHang:
           PhieuMuaHang: [PMH, MaHD, SoHoaDon]
-          MaHangHoa: [MaHang, MaHTK]
+          MaHangHoa: [MaHang, MaHTK, HangHoa, "Hàng Hóa", TenHangHoa, TenHang, "Sản phẩm"]
           SoLuong: [SL, Quantity, Qty]
           DonGia: [Gia, UnitPrice]
           TienThue: [Thue, Tax]

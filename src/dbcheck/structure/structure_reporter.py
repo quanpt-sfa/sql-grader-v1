@@ -12,14 +12,14 @@ HEADERS = ["component", "answer_object", "student_object", "status", "severity",
 
 TABLE_MAP_HEADERS = [
     "answer_table", "raw_answer_table", "student_table", "raw_student_table",
-    "normalized_student_table", "expanded_student_table",
+    "normalized_student_table", "expanded_student_table", "compact_student_table",
     "match_status", "match_method", "match_score",
     "candidate_tables", "review_required", "suggested_alias_entry"
 ]
 
 COLUMN_MAP_HEADERS = [
     "answer_table", "student_table", "answer_column", "student_column",
-    "raw_student_column", "normalized_student_column", "expanded_student_column",
+    "raw_student_column", "normalized_student_column", "expanded_student_column", "compact_student_column",
     "match_status", "match_method", "match_score",
     "answer_type", "student_type",
     "answer_type_raw", "student_type_raw",
@@ -142,6 +142,7 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                 "raw_student_table": "",
                 "normalized_student_table": "",
                 "expanded_student_table": "",
+                "compact_student_table": "",
                 "match_status": "TABLE_MISSING_ANSWER",
                 "match_method": "",
                 "match_score": 0.0,
@@ -310,6 +311,7 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                     "raw_student_column": "",
                     "normalized_student_column": "",
                     "expanded_student_column": "",
+                    "compact_student_column": "",
                     "match_status": "COLUMN_MISSING_ANSWER",
                     "match_method": "",
                     "match_score": 0.0,

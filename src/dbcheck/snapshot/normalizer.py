@@ -12,6 +12,22 @@ def remove_accents(s: str) -> str:
     s = s.replace('đ', 'd').replace('Đ', 'D')
     return s
 
+def normalize_key(s: str) -> str:
+    """Normalize a name to a compact key by removing accents, lowercasing, stripping prefixes, and removing all separators."""
+    if not s:
+        return ""
+    # Remove Vietnamese accents
+    s = remove_accents(s)
+    # Lowercase
+    s = s.lower().strip()
+    # Strip leading numbering prefixes (e.g. "06. ", "06_", "06-", "06 ")
+    s = re.sub(r'^\d+[\.\s_–\-]*', '', s).strip()
+    # Strip leading cau/câu prefixes
+    s = re.sub(r'^(câu|cau)\s*\d*[\.\s_–\-]*', '', s).strip()
+    # Remove all internal spaces, underscores, hyphens, en-dashes
+    s = re.sub(r'[\s_–\-]+', '', s)
+    return s
+
 def get_column_role(name: str) -> Optional[str]:
     """Identify the semantic role of a column based on name suffix/prefix."""
     name_l = name.lower()
@@ -80,44 +96,40 @@ class NameNormalizer:
         expanded = self._expand_abbreviations(normalized)
         
         candidates = []
+        student_key = normalize_key(raw_table)
         
         # 1. Exact match on canonical table name
         for canon in self.config.schema.tables.keys():
-            canon_l = canon.lower()
-            if normalized == canon_l:
+            if student_key == normalize_key(canon):
                 candidates.append((canon, "TABLE_MATCHED_EXACT", "exact", 100.0))
                 
         # 2. Alias match
         if not candidates:
             for canon, aliases in self.config.schema.tables.items():
                 for alias in aliases:
-                    alias_l = alias.lower()
-                    if normalized == alias_l:
+                    if student_key == normalize_key(alias):
                         status = "TABLE_MATCHED_ALIAS"
                         candidates.append((canon, status, "alias", 100.0))
                         
         # 3. Abbreviation match
         if not candidates:
-            expanded = self._expand_abbreviations(normalized)
             # A. Configured abbreviation expansion match
             if expanded != normalized:
                 for canon in self.config.schema.tables.keys():
-                    if expanded == canon.lower():
+                    if expanded == normalize_key(canon):
                         candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 for canon, aliases in self.config.schema.tables.items():
                     for alias in aliases:
-                        if expanded == alias.lower():
+                        if expanded == normalize_key(alias):
                             candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
             
             # B. Legacy abbreviation match (length <= 3)
             if not candidates and len(normalized) <= 3:
                 for canon, aliases in self.config.schema.tables.items():
-                    canon_l = canon.lower()
-                    if expanded == canon_l:
+                    if expanded == normalize_key(canon):
                         candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                     for alias in aliases:
-                        alias_l = alias.lower()
-                        if expanded == alias_l:
+                        if expanded == normalize_key(alias):
                             candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
 
         # Group and select best mapping method per canonical table
@@ -165,6 +177,7 @@ class NameNormalizer:
                 "raw_student_table": raw_table,
                 "normalized_student_table": normalized,
                 "expanded_student_table": expanded,
+                "compact_student_table": student_key,
                 "match_status": "TABLE_UNMAPPED",
                 "match_method": "",
                 "match_score": 0.0,
@@ -181,6 +194,7 @@ class NameNormalizer:
                 "raw_student_table": raw_table,
                 "normalized_student_table": normalized,
                 "expanded_student_table": expanded,
+                "compact_student_table": student_key,
                 "match_status": "TABLE_AMBIGUOUS",
                 "match_method": "multiple_matches",
                 "match_score": candidates[0][3],
@@ -200,6 +214,7 @@ class NameNormalizer:
                 "raw_student_table": raw_table,
                 "normalized_student_table": normalized,
                 "expanded_student_table": expanded,
+                "compact_student_table": student_key,
                 "match_status": status,
                 "match_method": method,
                 "match_score": score,
@@ -243,12 +258,12 @@ class NameNormalizer:
             natural_aliases = self.config.schema.key_grading.natural_key_aliases.get(canonical_table, {})
             
         candidates = []
+        student_key = normalize_key(raw_column)
         
         # 1. Exact match with canonical column name
         for col_meta in expected_cols:
             canon_col = col_meta["column_name"]
-            canon_col_l = canon_col.lower()
-            if normalized == canon_col_l:
+            if student_key == normalize_key(canon_col):
                 candidates.append((canon_col, "COLUMN_MATCHED_EXACT", "exact", 100.0))
                 
         # 2. Alias match (Table-scoped, then Natural Key, then Global)
@@ -258,22 +273,19 @@ class NameNormalizer:
             # A. Explicit table alias
             t_aliases = table_aliases.get(canon_col, [])
             for alias in t_aliases:
-                alias_l = alias.lower()
-                if normalized == alias_l:
+                if student_key == normalize_key(alias):
                     candidates.append((canon_col, "COLUMN_MATCHED_ALIAS", "table_alias", 100.0))
             
             # B. Natural key alias
             nk_aliases = natural_aliases.get(canon_col, [])
             for alias in nk_aliases:
-                alias_l = alias.lower()
-                if normalized == alias_l:
+                if student_key == normalize_key(alias):
                     candidates.append((canon_col, "COLUMN_MATCHED_ALIAS", "natural_key_alias", 100.0))
                     
             # C. Global alias
             g_aliases = global_aliases.get(canon_col, [])
             for alias in g_aliases:
-                alias_l = alias.lower()
-                if normalized == alias_l:
+                if student_key == normalize_key(alias):
                     candidates.append((canon_col, "COLUMN_MATCHED_ALIAS", "global_alias", 100.0))
                         
         # 3. Abbreviation match
@@ -281,39 +293,38 @@ class NameNormalizer:
         if expanded != normalized:
             for col_meta in expected_cols:
                 canon_col = col_meta["column_name"]
-                if expanded == canon_col.lower():
+                if expanded == normalize_key(canon_col):
                     candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 t_aliases = table_aliases.get(canon_col, [])
                 for alias in t_aliases:
-                    if expanded == alias.lower():
+                    if expanded == normalize_key(alias):
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 nk_aliases = natural_aliases.get(canon_col, [])
                 for alias in nk_aliases:
-                    if expanded == alias.lower():
+                    if expanded == normalize_key(alias):
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 g_aliases = global_aliases.get(canon_col, [])
                 for alias in g_aliases:
-                    if expanded == alias.lower():
+                    if expanded == normalize_key(alias):
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
         
         # Legacy abbreviation match (length <= 3)
         if len(normalized) <= 3:
             for col_meta in expected_cols:
                 canon_col = col_meta["column_name"]
-                canon_col_l = canon_col.lower()
-                if expanded == canon_col_l:
+                if expanded == normalize_key(canon_col):
                     candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 t_aliases = table_aliases.get(canon_col, [])
                 for alias in t_aliases:
-                    if expanded == alias.lower():
+                    if expanded == normalize_key(alias):
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 nk_aliases = natural_aliases.get(canon_col, [])
                 for alias in nk_aliases:
-                    if expanded == alias.lower():
+                    if expanded == normalize_key(alias):
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 g_aliases = global_aliases.get(canon_col, [])
                 for alias in g_aliases:
-                    if expanded == alias.lower():
+                    if expanded == normalize_key(alias):
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
 
         # Group and select best mapping method per column
@@ -327,7 +338,8 @@ class NameNormalizer:
                     "natural_key_alias": 4,
                     "exact": 3,
                     "global_alias": 2,
-                    "abbreviation": 1
+                    "abbreviation": 1,
+                    "fuzzy": 0
                 }
                 current_method = grouped[canon][1]
                 if pref.get(method, 0) > pref.get(current_method, 0):
@@ -389,6 +401,7 @@ class NameNormalizer:
                 "raw_student_column": raw_column,
                 "normalized_student_column": normalized,
                 "expanded_student_column": expanded,
+                "compact_student_column": student_key,
                 "match_status": "COLUMN_UNMAPPED",
                 "match_method": "",
                 "match_score": 0.0,
@@ -408,6 +421,7 @@ class NameNormalizer:
                 "raw_student_column": raw_column,
                 "normalized_student_column": normalized,
                 "expanded_student_column": expanded,
+                "compact_student_column": student_key,
                 "match_status": status,
                 "match_method": method,
                 "match_score": score,
@@ -427,6 +441,7 @@ class NameNormalizer:
                 "raw_student_column": raw_column,
                 "normalized_student_column": normalized,
                 "expanded_student_column": expanded,
+                "compact_student_column": student_key,
                 "match_status": "COLUMN_AMBIGUOUS",
                 "match_method": "multiple_matches",
                 "match_score": compatibles[0][3],
@@ -448,6 +463,7 @@ class NameNormalizer:
             "raw_student_column": raw_column,
             "normalized_student_column": normalized,
             "expanded_student_column": expanded,
+            "compact_student_column": student_key,
             "match_status": status,
             "match_method": method,
             "match_score": score,
