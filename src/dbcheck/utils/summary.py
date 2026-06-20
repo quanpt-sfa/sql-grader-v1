@@ -12,6 +12,7 @@ HEADERS = [
     "struct_missing_count",
     "struct_extra_count",
     "struct_type_mismatch_count",
+    "struct_type_warning_count",
     "struct_ambiguous_count",
     # View metrics
     "view_pass_count",
@@ -71,6 +72,8 @@ def compile_summary(run_dir: Path) -> Path:
                             row["struct_extra_count"] += 1
                         elif s_status == "TYPE_MISMATCH":
                             row["struct_type_mismatch_count"] += 1
+                        elif s_status == "TYPE_WARNING":
+                            row["struct_type_warning_count"] += 1
                         elif "AMBIGUOUS" in s_status:
                             row["struct_ambiguous_count"] += 1
             except Exception as e:

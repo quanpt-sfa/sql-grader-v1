@@ -4,6 +4,19 @@ assignment:
 
 schema:
   matching_threshold: 0.8
+  excluded_tables:
+    - sysdiagrams
+    - Stage_MuaHang
+    - Stage_TraTien
+  type_compatibility:
+    mode: group_with_warnings
+    compatible_warning_score: 0.75
+    allow_integer_decimal_compatibility: true
+    allow_decimal_float_compatibility: true
+    allow_bit_integer_compatibility: false
+    strict_length_check: false
+    strict_precision_scale_check: false
+
   aliases:
     tables:
       NhanVien: ["Employee", "NhanVien"]
