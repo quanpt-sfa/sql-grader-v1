@@ -62,52 +62,53 @@ schema:
 
   aliases:
     tables:
-      HangHoa: [Hang, HangTonKho, HTK, Product, Inventory, "01. HTK", "01.HangTonKho", "01. HTK (Hang hoa)", "01. HangTonKho"]
+      HangHoa: [Hang, HangTonKho, HTK, Product, Inventory, "01. HTK", "01.HangTonKho", "01. HTK (Hang hoa)", "01. HangTonKho", "Hàng Hóa", "Hàng hóa", "HangHoa", "Hang Hoa", "Hanghoa"]
       LoaiTien: [Tien, LoaiTien, Currency, Money, "02.Tien", "02.TIEN", "02. LoaiTien"]
       NhanVien: [NhanVien, NV, Employee, "03.NhanVien", "03. NhanVien"]
       NhaCungCap: [NCC, NhaCungCap, NguoiCungCap, NguoiBan, Supplier, Vendor, NB, "04. NCC", "04.NCC", "04. NhaCungCap"]
       MuaHang: [MuaHang, Muahangg, PhieuMuaHang, PMH, Purchase, PurchaseInvoice, "05.MUAHANG", "05.Muahangg", "05. MuaHang", HD, HoaDon, SoHoaDon]
       ChiTietMuaHang: [ChiTietMuaHang, CT_MuaHang, CTMuaHang, PurchaseDetail, "06. CT_MUAHANG", "06.CT_MuaHang", "06. ChiTietMuaHang"]
-      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien"]
-      ChiTietTraTien: [ChiTietTraTien, CT_ChiTien, CTChiTien, PaymentDetail, "08.CT_CHITIEN", "08.CT_ChiTien", "08. ChiTietTraTien"]
+      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien", "ThanhToan", "Thanh Toán"]
+      ChiTietTraTien: [ChiTietTraTien, CT_ChiTien, CTChiTien, PaymentDetail, "08.CT_CHITIEN", "08.CT_ChiTien", "08. ChiTietTraTien", "CTCT", "ctct"]
     columns:
       global: {}
       by_table:
         HangHoa:
           MaHangHoa: [MaHang, MaHTK, ProductID]
           TenHangHoa: [TenHang, TenHTK, ProductName, HangHoa, "Hàng Hóa", "Tên hàng hóa", "Sản phẩm"]
+          DonViTinh: [DVT, ĐVT, DonViTinh, "Đơn vị tính"]
         LoaiTien:
           MaLoaiTien: [MaTien, LoaiTien, CurrencyID]
-          TenLoaiTien: [TenTien, TenLoaiTien, CurrencyName]
+          TenLoaiTien: [TenTien, TenLoaiTien, CurrencyName, tenlt, "Tên loại tiền"]
         NhaCungCap:
           MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap, SupplierID, VendorID]
-          TenNhaCungCap: [TenNCC, TenNB, TenNguoiBan, TenNguoiCungCap, SupplierName, VendorName]
+          TenNhaCungCap: [TenNCC, TenNB, TenNguoiBan, TenNguoiCungCap, SupplierName, VendorName, "Nhà cung cấp"]
         MuaHang:
-          PhieuMuaHang: [PMH, MaHD, SoHoaDon, HoaDon, InvoiceNo]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, HoaDon, InvoiceNo, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD]
           NgayMuaHang: [Ngay, NgayMH, PurchaseDate]
-          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan]
-          MaNhanVien: [MaNV]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, NCC, "Nhà cung cấp", "Mã CC"]
+          MaNhanVien: [MaNV, NV, "Nhân viên", "NV mua hàng"]
           MaLoaiTien: [LoaiTien, MaTien]
         ChiTietMuaHang:
-          PhieuMuaHang: [PMH, MaHD, SoHoaDon]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD]
           MaHangHoa: [MaHang, MaHTK, HangHoa, "Hàng Hóa", TenHangHoa, TenHang, "Sản phẩm"]
           SoLuong: [SL, Quantity, Qty]
           DonGia: [Gia, UnitPrice]
           TienThue: [Thue, Tax]
         TraTien:
-          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC]
+          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC, SoPTT, SoPhieuTra, sophieutra]
           NgayTra: [Ngay, NgayChi, PaymentDate]
-          MaNhanVien: [MaNV]
-          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan]
+          MaNhanVien: [MaNV, NV, "Nhân viên", "NV mua hàng"]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, NCC, "Nhà cung cấp", "Mã CC"]
           MaLoaiTien: [LoaiTien, MaTien]
         ChiTietTraTien:
-          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC]
-          PhieuMuaHang: [PMH, MaHD, SoHoaDon]
-          MaLoaiTien: [LoaiTien, MaTien]
+          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC, SoPTT, SoPhieuTra, sophieutra]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD]
+          MaLoaiTien: [LoaiTien, MaTien, LoaiTT, LoaiThanhToan, HinhThucThanhToan, PhuongThucThanhToan, ThanhToan, "Thanh Toán", tenlt]
           SoTienTra: [SoTien, TienTra, AmountPaid, TongTienTra, TongTien]
         NhanVien:
           MaNhanVien: [MaNV]
-          TenNhanVien: [TenNV, EmployeeName]
+          TenNhanVien: [TenNV, EmployeeName, NhanVien, "Nhân viên"]
 
 views:
   mode: answer_snapshot

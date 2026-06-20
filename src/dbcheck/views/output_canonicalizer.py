@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from rapidfuzz import fuzz
 from dbcheck.config import AssignmentConfig, ViewConfig
 from dbcheck.utils.logging import get_logger
+from dbcheck.snapshot.normalizer import normalize_key
 
 def get_tolerance_decimals(tolerance: float) -> int:
     """Calculate the number of decimal places for a given tolerance."""
@@ -32,7 +33,7 @@ def resolve_view_columns(
     mapping = {}
     
     # Expected canonicals in this view
-    expected_canonicals = {col["canonical"].lower(): col for col in view_config.columns}
+    expected_canonicals = {normalize_key(col["canonical"]): col for col in view_config.columns}
     
     # Handle backward compatibility: check if accepted_table_col_mappings is actually global_col_aliases (dict of lists)
     global_col_aliases = {}
@@ -42,49 +43,49 @@ def resolve_view_columns(
         if isinstance(sample_val, (list, tuple)):
             global_col_aliases = accepted_table_col_mappings
         else:
-            mappings_dict = accepted_table_col_mappings
+            mappings_dict = {normalize_key(k): v for k, v in accepted_table_col_mappings.items()}
             
     for p_col in phys_cols:
-        p_col_l = p_col.lower()
+        p_col_norm = normalize_key(p_col)
         matched_canon = None
         
         # 1. view.expected_output aliases & exact match
-        for canon_l, col_meta in expected_canonicals.items():
-            if p_col_l == canon_l:
+        for canon_norm, col_meta in expected_canonicals.items():
+            if p_col_norm == canon_norm:
                 matched_canon = col_meta["canonical"]
                 break
-            aliases = [a.lower() for a in col_meta.get("aliases", [])]
-            if p_col_l in aliases:
+            aliases = [normalize_key(a) for a in col_meta.get("aliases", [])]
+            if p_col_norm in aliases:
                 matched_canon = col_meta["canonical"]
                 break
                 
         # 2. accepted table-scoped column mappings
         if not matched_canon:
-            if p_col_l in mappings_dict:
-                canon_name = mappings_dict[p_col_l]
-                if canon_name.lower() in expected_canonicals:
+            if p_col_norm in mappings_dict:
+                canon_name = mappings_dict[p_col_norm]
+                if normalize_key(canon_name) in expected_canonicals:
                     matched_canon = canon_name
                     
         # 2b. Check global column aliases (old format backward compatibility)
         if not matched_canon and global_col_aliases:
-            for canon_l, col_meta in expected_canonicals.items():
+            for canon_norm, col_meta in expected_canonicals.items():
                 canon_name = col_meta["canonical"]
-                global_aliases = [a.lower() for a in global_col_aliases.get(canon_name, [])]
-                if p_col_l in global_aliases:
+                global_aliases = [normalize_key(a) for a in global_col_aliases.get(canon_name, [])]
+                if p_col_norm in global_aliases:
                     matched_canon = canon_name
                     break
                     
         # 3. fuzzy fallback within expected output columns of this view only
         if not matched_canon:
             fuzzy_candidates = []
-            for canon_l, col_meta in expected_canonicals.items():
+            for canon_norm, col_meta in expected_canonicals.items():
                 canon_name = col_meta["canonical"]
-                score_raw = fuzz.ratio(p_col_l, canon_name.lower())
+                score_raw = fuzz.ratio(p_col_norm, normalize_key(canon_name))
                 
                 # Check aliases from view config
-                aliases = [a.lower() for a in col_meta.get("aliases", [])]
+                aliases = [normalize_key(a) for a in col_meta.get("aliases", [])]
                 for alias in aliases:
-                    score_raw = max(score_raw, fuzz.ratio(p_col_l, alias))
+                    score_raw = max(score_raw, fuzz.ratio(p_col_norm, alias))
                     
                 if score_raw >= column_accept_threshold * 100.0:
                     fuzzy_candidates.append((canon_name, score_raw))

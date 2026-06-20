@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 from typing import List, Dict, Any, Set
 from dbcheck.snapshot.reader import read_full_snapshot
-from dbcheck.snapshot.normalizer import NameNormalizer
+from dbcheck.snapshot.normalizer import NameNormalizer, normalize_key
 from dbcheck.structure.constraint_checker import match_constraints, is_surrogate_column
 from dbcheck.structure.view_matcher import match_views_structure
 from dbcheck.structure.type_compatibility import compare_sql_types
@@ -13,14 +13,16 @@ HEADERS = ["component", "answer_object", "student_object", "status", "severity",
 TABLE_MAP_HEADERS = [
     "answer_table", "raw_answer_table", "student_table", "raw_student_table",
     "normalized_student_table", "expanded_student_table", "compact_student_table",
-    "match_status", "match_method", "match_score",
+    "normalized_key", "match_status", "match_method", "match_score",
+    "alias_source", "is_weak_alias", "duplicate_resolution", "selected_mapping_reason",
     "candidate_tables", "review_required", "suggested_alias_entry"
 ]
 
 COLUMN_MAP_HEADERS = [
     "answer_table", "student_table", "answer_column", "student_column",
     "raw_student_column", "normalized_student_column", "expanded_student_column", "compact_student_column",
-    "match_status", "match_method", "match_score",
+    "normalized_key", "match_status", "match_method", "match_score",
+    "alias_source", "is_weak_alias", "duplicate_resolution", "selected_mapping_reason",
     "answer_type", "student_type",
     "answer_type_raw", "student_type_raw",
     "answer_type_group", "student_type_group",
@@ -90,7 +92,8 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
     table_mappings: List[Dict[str, Any]] = []
     accepted_statuses = {
         "TABLE_MATCHED_EXACT", "TABLE_MATCHED_ALIAS",
-        "TABLE_MATCHED_ABBREVIATION", "TABLE_MATCHED_FUZZY_HIGH"
+        "TABLE_MATCHED_ABBREVIATION", "TABLE_MATCHED_FUZZY_HIGH",
+        "TABLE_MATCHED_WEAK_ALIAS"
     }
 
     for s_tab in stu_tables_active:
@@ -143,19 +146,26 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                 "normalized_student_table": "",
                 "expanded_student_table": "",
                 "compact_student_table": "",
+                "normalized_key": normalize_key(canon) if canon else "",
                 "match_status": "TABLE_MISSING_ANSWER",
                 "match_method": "",
                 "match_score": 0.0,
+                "alias_source": "",
+                "is_weak_alias": False,
+                "duplicate_resolution": "",
+                "selected_mapping_reason": "Answer table is missing",
                 "candidate_tables": "",
                 "review_required": True,
                 "suggested_alias_entry": f"{canon}: [student_table_name]"
             })
 
-    # Ensure every row has raw_answer_table key
+    # Ensure every row has raw_answer_table key and normalized_key/other diagnostics
     for m in table_mappings:
         if "raw_answer_table" not in m:
             canon = m.get("answer_table", "")
             m["raw_answer_table"] = required_answer_canons.get(canon, canon)
+        if "normalized_key" not in m:
+            m["normalized_key"] = normalize_key(m.get("student_table", ""))
 
     # Save table mapping report
     output_report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,6 +183,11 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
     for m in table_mappings:
         if m["match_status"] in accepted_statuses:
             accepted_pairs[m["answer_table"]] = m["student_table"]
+
+    # Gather tables matched via weak alias
+    weak_matched_tables: Set[str] = {
+        m["answer_table"] for m in table_mappings if m["match_status"] == "TABLE_MATCHED_WEAK_ALIAS" and m["answer_table"]
+    }
 
     # -----------------------------------------------------------------------
     # 4. Phase 3: Column Normalization inside mapped pairs
@@ -194,12 +209,20 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                 None
             )
             col_res["answer_type"] = ans_col_meta["data_type"] if ans_col_meta else ""
+            
+            # Weak alias propagation
+            if canon_t in weak_matched_tables and col_res["match_status"].startswith("COLUMN_MATCHED"):
+                col_res["match_status"] = "COLUMN_MATCHED_WEAK_ALIAS"
+                col_res["is_weak_alias"] = True
+                col_res["review_required"] = True
+                col_res["selected_mapping_reason"] = "Matched in table with weak alias"
+
             table_col_mappings.append(col_res)
 
         # One-to-One column constraint
         by_answer_col = {}
         for cm in table_col_mappings:
-            if cm["match_status"].startswith("COLUMN_MATCHED") and cm.get("answer_column"):
+            if (cm["match_status"].startswith("COLUMN_MATCHED") or cm["match_status"] == "COLUMN_MATCHED_WEAK_ALIAS") and cm.get("answer_column"):
                 canon_c = cm["answer_column"]
                 by_answer_col.setdefault(canon_c, []).append(cm)
 
@@ -224,21 +247,23 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
             if len(mappings) > 1:
                 mappings.sort(
                     key=lambda x: (
-                        x.get("match_score", 0.0),
                         method_priority.get(x.get("match_method", ""), -1),
+                        x.get("match_score", 0.0),
                         get_name_priority(x.get("student_column", ""), canon_c)
                     ),
                     reverse=True
                 )
+                mappings[0]["duplicate_resolution"] = "accepted"
+                mappings[0]["selected_mapping_reason"] = "Selected match with highest priority"
                 for cm in mappings[1:]:
-                    cm["match_status"] = "COLUMN_UNMAPPED"
-                    cm["answer_column"] = ""
+                    cm["match_status"] = "DUPLICATE_MAPPING_REVIEW"
                     cm["review_required"] = True
-                    cm["match_method"] = "demoted_duplicate"
+                    cm["duplicate_resolution"] = "demoted_duplicate"
+                    cm["selected_mapping_reason"] = f"Demoted duplicate match (best match: '{mappings[0]['student_column']}')"
 
         # Type comparison using type_compatibility module
         for cm in table_col_mappings:
-            if cm["match_status"].startswith("COLUMN_MATCHED"):
+            if cm["match_status"].startswith("COLUMN_MATCHED") or cm["match_status"] == "COLUMN_MATCHED_WEAK_ALIAS":
                 canon_c = cm["answer_column"]
                 ans_col_meta = next((c for c in expected_cols if c["column_name"] == canon_c), None)
                 stu_col_meta = next((c for c in student_cols if c["column_name"] == cm.get("student_column")), None)
@@ -288,7 +313,8 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
 
         # Unmapped → Extra if all expected columns are covered
         mapped_cols_in_table: Set[str] = {
-            cm["answer_column"] for cm in table_col_mappings if cm.get("answer_column")
+            cm["answer_column"] for cm in table_col_mappings 
+            if cm.get("answer_column") and (cm["match_status"].startswith("COLUMN_MATCHED") or cm["match_status"] == "COLUMN_MATCHED_WEAK_ALIAS" or cm["match_status"] == "DUPLICATE_MAPPING_REVIEW")
         }
         all_expected_cols = {c["column_name"] for c in expected_cols}
         all_expected_mapped = all_expected_cols.issubset(mapped_cols_in_table)
@@ -312,9 +338,14 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                     "normalized_student_column": "",
                     "expanded_student_column": "",
                     "compact_student_column": "",
+                    "normalized_key": normalize_key(canon_c) if canon_c else "",
                     "match_status": "COLUMN_MISSING_ANSWER",
                     "match_method": "",
                     "match_score": 0.0,
+                    "alias_source": "",
+                    "is_weak_alias": False,
+                    "duplicate_resolution": "",
+                    "selected_mapping_reason": "Column is missing",
                     "answer_type": col_meta.get("data_type", ""),
                     "student_type": "",
                     "answer_type_raw": col_meta.get("data_type", ""),
@@ -348,15 +379,26 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
     for m in table_mappings:
         status = m["match_status"]
         if status in accepted_statuses:
-            structure_results.append({
-                "component": "table",
-                "answer_object": m["answer_table"],
-                "student_object": m["student_table"],
-                "status": "PASS",
-                "severity": "info",
-                "message": f"Table matched by {m['match_method']}",
-                "evidence": f"Score: {m['match_score']}"
-            })
+            if status == "TABLE_MATCHED_WEAK_ALIAS":
+                structure_results.append({
+                    "component": "table",
+                    "answer_object": m["answer_table"],
+                    "student_object": m["student_table"],
+                    "status": "TABLE_REVIEW_REQUIRED",
+                    "severity": "warning",
+                    "message": f"Table matched via weak alias: '{m['student_table']}' maps to '{m['answer_table']}'",
+                    "evidence": f"Weak alias: {m['compact_student_table']}"
+                })
+            else:
+                structure_results.append({
+                    "component": "table",
+                    "answer_object": m["answer_table"],
+                    "student_object": m["student_table"],
+                    "status": "PASS",
+                    "severity": "info",
+                    "message": f"Table matched by {m['match_method']}",
+                    "evidence": f"Score: {m['match_score']}"
+                })
             # Row count mismatch warning
             canon_t = m["answer_table"]
             phys_t = m["student_table"]
@@ -452,15 +494,36 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                     "evidence": cm.get("type_reason", "")
                 })
             else:
-                structure_results.append({
-                    "component": "column",
-                    "answer_object": ans_obj,
-                    "student_object": stud_obj,
-                    "status": "PASS",
-                    "severity": "info",
-                    "message": f"Column matched by {cm['match_method']}",
-                    "evidence": f"Mapped '{cm.get('student_column','')}' to '{cm.get('answer_column','')}'"
-                })
+                if status == "COLUMN_MATCHED_WEAK_ALIAS":
+                    structure_results.append({
+                        "component": "column",
+                        "answer_object": ans_obj,
+                        "student_object": stud_obj,
+                        "status": "COLUMN_MATCHED_WEAK_ALIAS",
+                        "severity": "warning",
+                        "message": f"Column matched in table with weak alias: '{cm.get('student_column','')}' matches '{cm.get('answer_column','')}'",
+                        "evidence": f"Table weak alias: {cm.get('student_table','')}"
+                    })
+                else:
+                    structure_results.append({
+                        "component": "column",
+                        "answer_object": ans_obj,
+                        "student_object": stud_obj,
+                        "status": "PASS",
+                        "severity": "info",
+                        "message": f"Column matched by {cm['match_method']}",
+                        "evidence": f"Mapped '{cm.get('student_column','')}' to '{cm.get('answer_column','')}'"
+                    })
+        elif status == "DUPLICATE_MAPPING_REVIEW":
+            structure_results.append({
+                "component": "column",
+                "answer_object": ans_obj,
+                "student_object": stud_obj,
+                "status": "DUPLICATE_MAPPING_REVIEW",
+                "severity": "warning",
+                "message": f"Duplicate column mapping detected: '{cm.get('student_column','')}' also maps to '{cm.get('answer_column','')}'",
+                "evidence": cm.get("selected_mapping_reason", "")
+            })
         elif status == "COLUMN_MISSING_ANSWER":
             is_miss_surr = is_surrogate_column(cm.get("answer_column",""), cm["answer_table"], 0, config)
             if hasattr(config.schema, "key_grading") and config.schema.key_grading.mode == "adequacy" and is_miss_surr:

@@ -172,6 +172,24 @@ def build_export_results_command(run_dir: str, config: str) -> List[str]:
         "--format", "xlsx"
     ]
 
+def build_score_results_command(run_dir: str, config: str) -> List[str]:
+    run_dir_path = Path(run_dir.strip())
+    overrides_file = run_dir_path / "manual_overrides.csv"
+    if not overrides_file.is_absolute():
+        overrides_file = REPO_ROOT / overrides_file
+        
+    cmd = [
+        sys.executable,
+        "src/dbcheck/cli/main.py",
+        "score-results",
+        "--run-dir", str(Path(run_dir.strip())),
+        "--config", str(Path(config.strip())),
+        "--rubric", str(Path(run_dir.strip()) / "grading_rubric.csv")
+    ]
+    if overrides_file.exists():
+        cmd.extend(["--overrides", str(Path(run_dir.strip()) / "manual_overrides.csv")])
+    return cmd
+
 def sanitize_text(text: str, secret: Optional[str]) -> str:
     """Removes sensitive password strings from logged text."""
     if secret and secret.strip() and secret in text:
@@ -376,12 +394,16 @@ class App:
         self.btn_full = ttk.Button(buttons_frame, text="Run Full Pipeline", style="Primary.TButton", command=lambda: self._run_command_pipeline("full"))
         self.btn_full.grid(row=0, column=4, padx=5)
 
+        self.run_scoring_var = tk.BooleanVar(value=False)
+        self.chk_run_scoring = ttk.Checkbutton(buttons_frame, text="Run scoring after export", variable=self.run_scoring_var)
+        self.chk_run_scoring.grid(row=0, column=5, padx=5)
+
         self.btn_stop = ttk.Button(buttons_frame, text="Stop", style="Stop.TButton", command=self._stop_process)
-        self.btn_stop.grid(row=0, column=5, padx=5)
+        self.btn_stop.grid(row=0, column=6, padx=5)
         self.btn_stop.config(state="disabled")
 
         self.btn_refresh = ttk.Button(buttons_frame, text="Refresh Results", command=self._on_refresh_clicked)
-        self.btn_refresh.grid(row=0, column=6, padx=5)
+        self.btn_refresh.grid(row=0, column=7, padx=5)
 
         self.all_action_buttons = [self.btn_snap, self.btn_comp, self.btn_views, self.btn_export, self.btn_full, self.btn_refresh]
 
@@ -522,13 +544,90 @@ class App:
             self.rq_tree.heading(col, text=col, anchor="w")
             self.rq_tree.column(col, width=120, minwidth=60, stretch=True, anchor="w")
 
-        # Tab 4: Results Files
+        # Tab 4: Scoring / Rubric
+        tab_scoring = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab_scoring, text=" Scoring / Rubric ")
+        
+        # 1. Top action buttons bar
+        scoring_actions = ttk.Frame(tab_scoring)
+        scoring_actions.pack(fill="x", pady=(0, 10))
+        
+        ttk.Button(scoring_actions, text="Load Rubric", command=self._load_rubric_file).pack(side="left", padx=5)
+        ttk.Button(scoring_actions, text="Save Rubric", command=self._save_rubric).pack(side="left", padx=5)
+        self.btn_score = ttk.Button(scoring_actions, text="Score Results", style="Primary.TButton", command=lambda: self._run_command_pipeline("score-results"))
+        self.btn_score.pack(side="left", padx=5)
+        ttk.Button(scoring_actions, text="Open grading_summary.xlsx", command=self._open_grading_summary_xlsx).pack(side="left", padx=5)
+        
+        # 2. Main content area
+        scoring_main = ttk.Frame(tab_scoring)
+        scoring_main.pack(fill="both", expand=True)
+        scoring_main.columnconfigure(0, weight=1)
+        scoring_main.columnconfigure(1, weight=1)
+        
+        # Left Frame: Standard Components
+        std_frame = ttk.LabelFrame(scoring_main, text=" Standard Components ", padding=10)
+        std_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        std_frame.columnconfigure(1, weight=1)
+        
+        self.pt_tables = tk.StringVar(value="1.0")
+        self.pt_columns = tk.StringVar(value="2.0")
+        self.pt_pks = tk.StringVar(value="1.0")
+        self.pt_fks = tk.StringVar(value="1.0")
+        self.pt_row_counts = tk.StringVar(value="1.0")
+        self.pt_manual = tk.StringVar(value="0.0")
+        
+        self.pt_tables.trace_add("write", self._update_rubric_total)
+        self.pt_columns.trace_add("write", self._update_rubric_total)
+        self.pt_pks.trace_add("write", self._update_rubric_total)
+        self.pt_fks.trace_add("write", self._update_rubric_total)
+        self.pt_row_counts.trace_add("write", self._update_rubric_total)
+        self.pt_manual.trace_add("write", self._update_rubric_total)
+        
+        ttk.Label(std_frame, text="Tables Point Allocation:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(std_frame, textvariable=self.pt_tables, width=10).grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(std_frame, text="Columns Point Allocation:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(std_frame, textvariable=self.pt_columns, width=10).grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(std_frame, text="Primary Keys Point Allocation:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Entry(std_frame, textvariable=self.pt_pks, width=10).grid(row=2, column=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(std_frame, text="Foreign Keys Point Allocation:").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Entry(std_frame, textvariable=self.pt_fks, width=10).grid(row=3, column=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(std_frame, text="Row Counts Point Allocation:").grid(row=4, column=0, sticky="w", pady=5)
+        ttk.Entry(std_frame, textvariable=self.pt_row_counts, width=10).grid(row=4, column=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(std_frame, text="Manual Section Point Allocation:").grid(row=5, column=0, sticky="w", pady=5)
+        ttk.Entry(std_frame, textvariable=self.pt_manual, width=10).grid(row=5, column=1, sticky="w", padx=5, pady=5)
+        
+        # Right Frame: Views / Queries
+        self.rubric_views_frame = ttk.LabelFrame(scoring_main, text=" Views / Queries ", padding=10)
+        self.rubric_views_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.rubric_views_frame.columnconfigure(1, weight=1)
+        self.pt_views = {}
+        
+        # 3. Bottom status and warning area
+        scoring_bottom = ttk.Frame(tab_scoring)
+        scoring_bottom.pack(fill="x", pady=(10, 0))
+        
+        self.lbl_rubric_total = ttk.Label(scoring_bottom, text="Total Rubric Points: 0.00", font=("Segoe UI", 11, "bold"))
+        self.lbl_rubric_total.pack(side="left", padx=5)
+        
+        self.lbl_rubric_warning = ttk.Label(scoring_bottom, text="", font=("Segoe UI", 10, "italic"))
+        self.lbl_rubric_warning.pack(side="left", padx=20)
+        
+        # Tab 5: Results Files
         tab_files = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab_files, text=" Results Files ")
         
         self.files_list = [
             ("summary.xlsx", "summary.xlsx"),
             ("summary.csv", "summary.csv"),
+            ("grading_summary.xlsx", "grading_summary.xlsx"),
+            ("grading_summary.csv", "grading_summary.csv"),
+            ("grading_detail.csv", "grading_detail.csv"),
+            ("grading_rubric.csv", "grading_rubric.csv"),
             ("review_queue.xlsx", "review_queue.xlsx"),
             ("review_queue.csv", "review_queue.csv"),
             ("hard_errors.csv", "hard_errors.csv"),
@@ -551,6 +650,8 @@ class App:
             btn_open.pack(side="right", padx=5)
             
             self.file_widgets.append((lbl_status, btn_open, subpath))
+
+        self.all_action_buttons.append(self.btn_score)
 
         # Tab 5: Console / Logs
         tab_logs = ttk.Frame(self.notebook, padding=5)
@@ -634,6 +735,22 @@ class App:
                 self.test_data_entry.config(state="normal")
                 self.btn_browse_test_data.config(state="normal")
                 self.lbl_config_note.config(text="View testing seeds test data; Test Data Folder is required.")
+                
+            # Clear views first
+            for widget in self.rubric_views_frame.winfo_children():
+                widget.destroy()
+            self.pt_views = {}
+            
+            # Redraw view inputs dynamically
+            for i, view_cfg in enumerate(config.views):
+                v_name = view_cfg.answer_view
+                ttk.Label(self.rubric_views_frame, text=f"View {v_name}:").grid(row=i, column=0, sticky="w", pady=2)
+                var = tk.StringVar(value="1.0")
+                var.trace_add("write", self._update_rubric_total)
+                self.pt_views[v_name] = var
+                ttk.Entry(self.rubric_views_frame, textvariable=var, width=10).grid(row=i, column=1, sticky="w", padx=5, pady=2)
+            self._update_rubric_total()
+            
         except Exception as e:
             self._clear_config_summary()
             self.log(f"[WARNING] Failed to parse config properties: {e}\n")
@@ -651,6 +768,13 @@ class App:
         self.current_config_execution_mode = "compare_existing_data"
         self.test_data_entry.config(state="normal")
         self.btn_browse_test_data.config(state="normal")
+        
+        # Clear rubric views frame
+        if hasattr(self, 'rubric_views_frame'):
+            for widget in self.rubric_views_frame.winfo_children():
+                widget.destroy()
+        self.pt_views = {}
+        self._update_rubric_total()
 
     def _refresh_run_dir(self):
         run_name = f"runs/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -788,6 +912,14 @@ class App:
                 build_export_results_command(run_dir, cfg),
                 "Export Results"
             ))
+        elif pipeline_type == "score-results":
+            rubric_file = REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv"
+            if not rubric_file.exists():
+                self._save_rubric()
+            self.pipeline_queue.append((
+                build_score_results_command(run_dir, cfg),
+                "Score Results"
+            ))
         elif pipeline_type == "full":
             self.pipeline_queue.append((
                 build_snapshot_command(ans_bak, subs, run_dir, cfg),
@@ -805,14 +937,22 @@ class App:
                 build_export_results_command(run_dir, cfg),
                 "Export Results"
             ))
+            # Append score-results if checked or rubric file already exists
+            if self.run_scoring_var.get() or (REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv").exists():
+                if self.run_scoring_var.get() and not (REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv").exists():
+                    self._save_rubric()
+                self.pipeline_queue.append((
+                    build_score_results_command(run_dir, cfg),
+                    "Score Results"
+                ))
 
         # Disable GUI buttons during execution
         for btn in self.all_action_buttons:
             btn.config(state="disabled")
         self.btn_stop.config(state="normal")
 
-        # Auto-switch to Console / Logs tab (index 4)
-        self.notebook.select(4)
+        # Auto-switch to Console / Logs tab (index 5)
+        self.notebook.select(5)
 
         self.log_text.delete("1.0", tk.END)
         self.log(f"=== Pipeline '{pipeline_type}' Started ===\n")
@@ -921,6 +1061,19 @@ class App:
                             progress_val = 100
                         else:
                             progress_val = int(100 * (current_step_idx / total_steps))
+                    elif total_steps == 5:  # Full Pipeline with scoring
+                        if cmd_name == "Create Snapshot":
+                            progress_val = 20
+                        elif cmd_name == "Compare Structure":
+                            progress_val = 40
+                        elif cmd_name == "Test Views":
+                            progress_val = 60
+                        elif cmd_name == "Export Results":
+                            progress_val = 80
+                        elif cmd_name == "Score Results":
+                            progress_val = 100
+                        else:
+                            progress_val = int(100 * (current_step_idx / total_steps))
                     else:
                         progress_val = int(100 * (current_step_idx / total_steps))
                         
@@ -952,8 +1105,8 @@ class App:
             status_lbl = "Status: Completed Successfully"
             self.root.after(0, lambda: self._update_progress_ui(100, None, "Success", status_lbl))
 
-        # Refresh metrics only if Export Results succeeded and the pipeline was NOT cancelled.
-        should_refresh = ("Export Results" in completed_stages) and not self.stop_requested
+        # Refresh metrics only if Export Results or Score Results succeeded and the pipeline was NOT cancelled.
+        should_refresh = (("Export Results" in completed_stages) or ("Score Results" in completed_stages)) and not self.stop_requested
         self.root.after(0, lambda sr=should_refresh: self._on_pipeline_finished(sr))
 
     def _on_pipeline_finished(self, should_refresh: bool):
@@ -984,19 +1137,29 @@ class App:
             return pd.DataFrame()
             
         run_dir = REPO_ROOT / run_dir_str
+        grading_csv = run_dir / "grading_summary.csv"
         summary_csv = run_dir / "summary.csv"
         summary_xlsx = run_dir / "summary.xlsx"
         
         df = pd.DataFrame()
         
-        # 1. Try reading summary.csv
+        # Try reading grading_summary.csv first
+        if grading_csv.exists():
+            try:
+                df = pd.read_csv(grading_csv)
+                if not df.empty:
+                    return df
+            except Exception as e:
+                self.log(f"[WARNING] Failed to read grading_summary.csv: {e}\n")
+                
+        # Try reading summary.csv
         if summary_csv.exists():
             try:
                 df = pd.read_csv(summary_csv)
             except Exception as e:
                 self.log(f"[WARNING] Failed to read summary.csv: {e}\n")
                 
-        # 2. If it is empty or missing suggested_status, check if summary.xlsx has it
+        # If it is empty or missing suggested_status, check if summary.xlsx has it
         if df.empty or 'suggested_status' not in df.columns:
             if summary_xlsx.exists():
                 try:
@@ -1058,6 +1221,18 @@ class App:
             lbl_msg.pack(pady=20, anchor="center")
             return
 
+        # If df is grading_summary, let's load summary.csv for the status distribution / details
+        run_dir_str = self.run_dir_var.get().strip()
+        run_dir = REPO_ROOT / run_dir_str
+        summary_csv = run_dir / "summary.csv"
+        
+        df_summary = pd.DataFrame()
+        if summary_csv.exists():
+            try:
+                df_summary = pd.read_csv(summary_csv)
+            except Exception:
+                pass
+
         total_subs = len(df)
         ok_restores = (df['manifest_status'] == 'OK').sum() if 'manifest_status' in df.columns else total_subs
         err_restores = total_subs - ok_restores
@@ -1079,7 +1254,17 @@ class App:
         
         has_final_metrics = ('hard_error_count' in df.columns) and ('manual_review_count' in df.columns)
         
-        if has_final_metrics:
+        if 'auto_score' in df.columns:
+            avg_auto = df['auto_score'].mean()
+            avg_final = df['final_score'].mean()
+            total_rev = df['review_required_count'].sum()
+            total_err = df['hard_error_count'].sum()
+            
+            ttk.Label(c_counts, text=f"Avg Auto Score: {avg_auto:.2f}", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+            ttk.Label(c_counts, text=f"Avg Final Score: {avg_final:.2f}", font=("Segoe UI", 10, "bold"), foreground="green").pack(anchor="w")
+            ttk.Label(c_counts, text=f"Total Review Required: {total_rev}", foreground="orange" if total_rev > 0 else "gray").pack(anchor="w")
+            ttk.Label(c_counts, text=f"Total Hard Errors: {total_err}", foreground="red" if total_err > 0 else "gray").pack(anchor="w")
+        elif has_final_metrics:
             he_total = df['hard_error_count'].sum()
             mr_total = df['manual_review_count'].sum()
             warn_total = df['warning_count'].sum() if 'warning_count' in df.columns else 0
@@ -1095,8 +1280,9 @@ class App:
         c_status = ttk.LabelFrame(metrics_frame, text=" Status Recommendations ", padding=10)
         c_status.grid(row=0, column=2, sticky="nsew", padx=5)
         
-        if 'suggested_status' in df.columns:
-            counts = df['suggested_status'].value_counts()
+        status_df = df_summary if not df_summary.empty else df
+        if 'suggested_status' in status_df.columns:
+            counts = status_df['suggested_status'].value_counts()
             for status, count in counts.items():
                 lbl_color = "black"
                 if "FAIL" in status:
@@ -1122,11 +1308,12 @@ class App:
         v_frame.grid(row=0, column=0, sticky="n")
         ttk.Label(v_frame, text="Views Testing Stats", font=("Segoe UI", 10, "bold", "underline")).pack(anchor="w", pady=(0, 5))
         
-        if 'view_pass_count' in df.columns:
-            v_pass = df['view_pass_count'].sum()
-            v_miss = df['view_missing_count'].sum() if 'view_missing_count' in df.columns else 0
-            v_err = df['view_execution_error_count'].sum() if 'view_execution_error_count' in df.columns else 0
-            v_mismatch = df['view_value_mismatch_count'].sum() if 'view_value_mismatch_count' in df.columns else 0
+        detail_df = df_summary if not df_summary.empty else df
+        if 'view_pass_count' in detail_df.columns:
+            v_pass = detail_df['view_pass_count'].sum()
+            v_miss = detail_df['view_missing_count'].sum() if 'view_missing_count' in detail_df.columns else 0
+            v_err = detail_df['view_execution_error_count'].sum() if 'view_execution_error_count' in detail_df.columns else 0
+            v_mismatch = detail_df['view_value_mismatch_count'].sum() if 'view_value_mismatch_count' in detail_df.columns else 0
             ttk.Label(v_frame, text=f"Passing Views: {v_pass}", foreground="green").pack(anchor="w")
             ttk.Label(v_frame, text=f"Missing Views: {v_miss}", foreground="red" if v_miss > 0 else "gray").pack(anchor="w")
             ttk.Label(v_frame, text=f"Execution Errors: {v_err}", foreground="red" if v_err > 0 else "gray").pack(anchor="w")
@@ -1140,16 +1327,16 @@ class App:
         ttk.Label(pk_frame, text="PK Adequacy Stats", font=("Segoe UI", 10, "bold", "underline")).pack(anchor="w", pady=(0, 5))
         
         pk_cols = ['pk_exact_match_count', 'pk_alias_equivalent_count', 'pk_surrogate_accepted_count', 'pk_natural_accepted_count', 'pk_alternative_accepted_count', 'pk_review_required_count', 'pk_missing_count', 'pk_invalid_count']
-        if any(c in df.columns for c in pk_cols):
+        if any(c in detail_df.columns for c in pk_cols):
             pk_acc = 0
             for col in ['pk_exact_match_count', 'pk_alias_equivalent_count', 'pk_surrogate_accepted_count', 'pk_natural_accepted_count', 'pk_alternative_accepted_count']:
-                if col in df.columns:
-                    pk_acc += df[col].sum()
-            pk_rev = df['pk_review_required_count'].sum() if 'pk_review_required_count' in df.columns else 0
+                if col in detail_df.columns:
+                    pk_acc += detail_df[col].sum()
+            pk_rev = detail_df['pk_review_required_count'].sum() if 'pk_review_required_count' in detail_df.columns else 0
             pk_miss = 0
             for col in ['pk_missing_count', 'pk_invalid_count']:
-                if col in df.columns:
-                    pk_miss += df[col].sum()
+                if col in detail_df.columns:
+                    pk_miss += detail_df[col].sum()
             ttk.Label(pk_frame, text=f"Accepted PKs: {pk_acc}", foreground="green").pack(anchor="w")
             ttk.Label(pk_frame, text=f"Review Required: {pk_rev}", foreground="orange" if pk_rev > 0 else "gray").pack(anchor="w")
             ttk.Label(pk_frame, text=f"Missing/Invalid PKs: {pk_miss}", foreground="red" if pk_miss > 0 else "gray").pack(anchor="w")
@@ -1162,16 +1349,16 @@ class App:
         ttk.Label(fk_frame, text="FK Relationships Stats", font=("Segoe UI", 10, "bold", "underline")).pack(anchor="w", pady=(0, 5))
         
         fk_cols = ['fk_exact_match_count', 'fk_relationship_match_count', 'fk_alias_equivalent_count', 'fk_surrogate_accepted_count', 'fk_natural_accepted_count', 'fk_review_required_count', 'fk_missing_count', 'fk_wrong_target_count']
-        if any(c in df.columns for c in fk_cols):
+        if any(c in detail_df.columns for c in fk_cols):
             fk_acc = 0
             for col in ['fk_exact_match_count', 'fk_relationship_match_count', 'fk_alias_equivalent_count', 'fk_surrogate_accepted_count', 'fk_natural_accepted_count']:
-                if col in df.columns:
-                    fk_acc += df[col].sum()
-            fk_rev = df['fk_review_required_count'].sum() if 'fk_review_required_count' in df.columns else 0
+                if col in detail_df.columns:
+                    fk_acc += detail_df[col].sum()
+            fk_rev = detail_df['fk_review_required_count'].sum() if 'fk_review_required_count' in detail_df.columns else 0
             fk_miss = 0
             for col in ['fk_missing_count', 'fk_wrong_target_count']:
-                if col in df.columns:
-                    fk_miss += df[col].sum()
+                if col in detail_df.columns:
+                    fk_miss += detail_df[col].sum()
             ttk.Label(fk_frame, text=f"Accepted FKs: {fk_acc}", foreground="green").pack(anchor="w")
             ttk.Label(fk_frame, text=f"Review Required: {fk_rev}", foreground="orange" if fk_rev > 0 else "gray").pack(anchor="w")
             ttk.Label(fk_frame, text=f"Missing/Wrong FKs: {fk_miss}", foreground="red" if fk_miss > 0 else "gray").pack(anchor="w")
@@ -1325,8 +1512,12 @@ class App:
         if not run_dir_str:
             messagebox.showerror("Error", "Run directory path is empty.")
             return
-        summary_path = REPO_ROOT / run_dir_str / "summary.csv"
-        self._safe_open_path(summary_path)
+        run_dir = REPO_ROOT / run_dir_str
+        grading_path = run_dir / "grading_summary.csv"
+        summary_path = run_dir / "summary.csv"
+        
+        path_to_open = grading_path if grading_path.exists() else summary_path
+        self._safe_open_path(path_to_open)
 
     def _open_mapping_reports(self):
         run_dir_str = self.run_dir_var.get().strip()
@@ -1346,6 +1537,179 @@ class App:
         student_id = row_values[0]  # submission_id is column 0
         reports_dir = REPO_ROOT / run_dir_str / "submissions" / student_id / "reports"
         self._safe_open_path(reports_dir)
+
+    def _update_rubric_total(self, *args):
+        total = 0.0
+        for var in [self.pt_tables, self.pt_columns, self.pt_pks, self.pt_fks, self.pt_row_counts, self.pt_manual]:
+            try:
+                total += float(var.get() or 0.0)
+            except ValueError:
+                pass
+        for var in self.pt_views.values():
+            try:
+                total += float(var.get() or 0.0)
+            except ValueError:
+                pass
+                
+        self.lbl_rubric_total.config(text=f"Total Rubric Points: {total:.2f}")
+        if abs(total - 10.0) > 0.001:
+            self.lbl_rubric_total.config(foreground="orange")
+            self.lbl_rubric_warning.config(text="⚠ Warning: Total points should sum to exactly 10.0.")
+        else:
+            self.lbl_rubric_total.config(foreground="green")
+            self.lbl_rubric_warning.config(text="")
+
+    def _save_rubric(self):
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            messagebox.showerror("Error", "Run directory path is empty.")
+            return
+            
+        try:
+            pts_tables = float(self.pt_tables.get() or 0.0)
+            pts_columns = float(self.pt_columns.get() or 0.0)
+            pts_pks = float(self.pt_pks.get() or 0.0)
+            pts_fks = float(self.pt_fks.get() or 0.0)
+            pts_row_counts = float(self.pt_row_counts.get() or 0.0)
+            pts_manual = float(self.pt_manual.get() or 0.0)
+            
+            view_pts = {}
+            for v_name, var in self.pt_views.items():
+                view_pts[v_name] = float(var.get() or 0.0)
+        except ValueError:
+            messagebox.showerror("Error", "All point values must be valid numbers.")
+            return
+            
+        total = pts_tables + pts_columns + pts_pks + pts_fks + pts_row_counts + pts_manual + sum(view_pts.values())
+        if abs(total - 10.0) > 0.001:
+            messagebox.showwarning("Warning", f"Total rubric points ({total:.2f}) does not equal 10.0.")
+            
+        run_dir = REPO_ROOT / run_dir_str
+        run_dir.mkdir(parents=True, exist_ok=True)
+        rubric_csv = run_dir / "grading_rubric.csv"
+        
+        try:
+            with open(rubric_csv, "w", newline="", encoding="utf-8") as f:
+                headers = ["section", "component", "scope", "object_name", "total_points", "scoring_mode", "include_statuses", "partial_policy", "notes"]
+                writer = csv.DictWriter(f, fieldnames=headers)
+                writer.writeheader()
+                
+                # Tables
+                writer.writerow({
+                    "section": "A", "component": "tables", "scope": "all", "object_name": "",
+                    "total_points": pts_tables, "scoring_mode": "proportional",
+                    "include_statuses": "TABLE_MATCHED_EXACT|TABLE_MATCHED_ALIAS|TABLE_MATCHED_ABBREVIATION|TABLE_MATCHED_FUZZY_HIGH|TABLE_MATCHED_WEAK_ALIAS",
+                    "partial_policy": "review_pending", "notes": "Proportional tables mapping points"
+                })
+                # Columns
+                writer.writerow({
+                    "section": "B", "component": "columns", "scope": "all", "object_name": "",
+                    "total_points": pts_columns, "scoring_mode": "proportional",
+                    "include_statuses": "COLUMN_MATCHED_EXACT|COLUMN_MATCHED_ALIAS|COLUMN_MATCHED_ABBREVIATION|COLUMN_MATCHED_WEAK_ALIAS",
+                    "partial_policy": "review_pending", "notes": "Proportional columns mapping points"
+                })
+                # Primary Keys
+                writer.writerow({
+                    "section": "C", "component": "primary_keys", "scope": "all", "object_name": "",
+                    "total_points": pts_pks, "scoring_mode": "proportional",
+                    "include_statuses": "PK_MATCH_EXACT|PK_MATCH_ALIAS_EQUIVALENT|PK_SURROGATE_ACCEPTED|PK_NATURAL_ACCEPTED",
+                    "partial_policy": "review_pending", "notes": "Proportional primary keys points"
+                })
+                # Foreign Keys
+                writer.writerow({
+                    "section": "D", "component": "foreign_keys", "scope": "all", "object_name": "",
+                    "total_points": pts_fks, "scoring_mode": "proportional",
+                    "include_statuses": "FK_MATCH_EXACT|FK_ALIAS_EQUIVALENT|FK_SURROGATE_ACCEPTED|FK_NATURAL_ACCEPTED",
+                    "partial_policy": "review_pending", "notes": "Proportional foreign keys points"
+                })
+                # Row Counts
+                writer.writerow({
+                    "section": "E", "component": "row_counts", "scope": "all", "object_name": "",
+                    "total_points": pts_row_counts, "scoring_mode": "proportional",
+                    "include_statuses": "PASS",
+                    "partial_policy": "review_pending", "notes": "Proportional row count check points"
+                })
+                # Views
+                for v_name, pts in view_pts.items():
+                    writer.writerow({
+                        "section": "F", "component": "views", "scope": v_name, "object_name": "",
+                        "total_points": pts, "scoring_mode": "weighted_subchecks",
+                        "include_statuses": "VIEW_PASS",
+                        "partial_policy": "partial_view", "notes": f"Weighted view check points for {v_name}"
+                    })
+                # Manual
+                writer.writerow({
+                    "section": "M", "component": "manual", "scope": "all", "object_name": "",
+                    "total_points": pts_manual, "scoring_mode": "manual_only",
+                    "include_statuses": "",
+                    "partial_policy": "", "notes": "Optional manual grading section"
+                })
+                
+            self.log(f"[INFO] Rubric saved to: {os.path.relpath(rubric_csv, REPO_ROOT)}\n")
+            self._load_results_files_status()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save rubric: {e}")
+
+    def _load_rubric_file(self):
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            messagebox.showerror("Error", "Run directory path is empty.")
+            return
+        run_dir = REPO_ROOT / run_dir_str
+        rubric_csv = run_dir / "grading_rubric.csv"
+        
+        if not rubric_csv.exists():
+            messagebox.showinfo("Not Found", f"Rubric file grading_rubric.csv not found in run directory. Creating defaults.")
+            self.pt_tables.set("1.0")
+            self.pt_columns.set("2.0")
+            self.pt_pks.set("1.0")
+            self.pt_fks.set("1.0")
+            self.pt_row_counts.set("1.0")
+            self.pt_manual.set("0.0")
+            for var in self.pt_views.values():
+                var.set("1.0")
+            return
+            
+        try:
+            with open(rubric_csv, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                view_pts_found = {}
+                for row in reader:
+                    comp = row["component"]
+                    scope = row["scope"]
+                    pts = row["total_points"]
+                    
+                    if comp == "tables":
+                        self.pt_tables.set(pts)
+                    elif comp == "columns":
+                        self.pt_columns.set(pts)
+                    elif comp == "primary_keys":
+                        self.pt_pks.set(pts)
+                    elif comp == "foreign_keys":
+                        self.pt_fks.set(pts)
+                    elif comp == "row_counts":
+                        self.pt_row_counts.set(pts)
+                    elif comp == "manual":
+                        self.pt_manual.set(pts)
+                    elif comp == "views":
+                        view_pts_found[scope] = pts
+                        
+                for v_name, var in self.pt_views.items():
+                    if v_name in view_pts_found:
+                        var.set(view_pts_found[v_name])
+                    else:
+                        var.set("1.0")
+            self.log(f"[INFO] Rubric loaded from: {os.path.relpath(rubric_csv, REPO_ROOT)}\n")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load rubric: {e}")
+
+    def _open_grading_summary_xlsx(self):
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            messagebox.showerror("Error", "Run directory path is empty.")
+            return
+        path = REPO_ROOT / run_dir_str / "grading_summary.xlsx"
+        self._safe_open_path(path)
 
 # --- Launcher Main Function ---
 

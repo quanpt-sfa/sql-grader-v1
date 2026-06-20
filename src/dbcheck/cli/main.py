@@ -36,6 +36,13 @@ def main():
     export_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
     export_parser.add_argument("--format", default="xlsx", choices=["xlsx", "csv"], help="Output format (default: xlsx)")
 
+    # Command: score-results
+    score_parser = subparsers.add_parser("score-results", help="Compute scores using config and rubric")
+    score_parser.add_argument("--run-dir", required=True, help="Runs directory containing reports")
+    score_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
+    score_parser.add_argument("--rubric", required=True, help="Path to grading rubric CSV file")
+    score_parser.add_argument("--overrides", required=False, default=None, help="Path to optional manual overrides CSV file")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -62,6 +69,9 @@ def main():
         elif args.command == "export-results":
             from dbcheck.cli.export_results import run_export_results
             run_export_results(args)
+        elif args.command == "score-results":
+            from dbcheck.cli.score_results import run_score_results
+            run_score_results(args)
         logger.info(f"Successfully completed command: {args.command}")
     except Exception as e:
         logger.exception(f"Command '{args.command}' failed with error: {e}")

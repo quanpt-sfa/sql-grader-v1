@@ -309,19 +309,19 @@ def test_priority_column_selection(base_config_data, tmp_path):
     for col in ["PhieuMH", "SoHD", "MaHD"]:
         m = next((m for m in mappings if m["student_column"] == col), None)
         assert m is not None
-        assert m["match_status"] == "COLUMN_UNMAPPED"
-        assert m["match_method"] == "demoted_duplicate"
-        assert m["answer_column"] == ""
+        assert m["match_status"] == "DUPLICATE_MAPPING_REVIEW"
+        assert m["duplicate_resolution"] == "demoted_duplicate"
+        assert m["answer_column"] == "PhieuMuaHang"
         
     with open(report_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         results = list(reader)
         
-    unmapped_results = [r for r in results if r["status"] == "EXTRA_REVIEW"]
+    unmapped_results = [r for r in results if r["status"] == "DUPLICATE_MAPPING_REVIEW"]
     assert len(unmapped_results) == 3
     for r in unmapped_results:
         assert r["severity"] == "warning"
-        assert "Unmapped column" in r["message"]
+        assert "Duplicate column mapping" in r["message"]
 
 def test_surrogate_foreign_key_safety(base_config_data):
     config = AssignmentConfig(base_config_data)

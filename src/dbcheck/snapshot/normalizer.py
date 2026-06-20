@@ -13,18 +13,20 @@ def remove_accents(s: str) -> str:
     return s
 
 def normalize_key(s: str) -> str:
-    """Normalize a name to a compact key by removing accents, lowercasing, stripping prefixes, and removing all separators."""
+    """Normalize a name to a compact key by removing accents, lowercasing, stripping prefixes, and removing all separators and punctuation."""
     if not s:
         return ""
     # Remove Vietnamese accents
     s = remove_accents(s)
     # Lowercase
     s = s.lower().strip()
-    # Strip leading numbering prefixes (e.g. "06. ", "06_", "06-", "06 ")
+    # Strip leading numbering prefixes (e.g. "01.", "1.", "06.", etc.)
     s = re.sub(r'^\d+[\.\s_–\-]*', '', s).strip()
     # Strip leading cau/câu prefixes
     s = re.sub(r'^(câu|cau)\s*\d*[\.\s_–\-]*', '', s).strip()
-    # Remove all internal spaces, underscores, hyphens, en-dashes
+    # Remove punctuation
+    s = re.sub(r'[^\w\s]', '', s)
+    # Remove spaces, underscores, hyphens, en-dashes
     s = re.sub(r'[\s_–\-]+', '', s)
     return s
 
@@ -50,6 +52,9 @@ def check_roles_compatible(role1: Optional[str], role2: Optional[str]) -> bool:
     if role1 is not None and role2 is not None:
         return role1 == role2
     return True
+
+# Constants for weak alias definitions
+WEAK_TABLE_ALIASES = {"ctct", "thanhtoan"}
 
 class NameNormalizer:
     def __init__(self, config: AssignmentConfig):
@@ -103,13 +108,14 @@ class NameNormalizer:
             if student_key == normalize_key(canon):
                 candidates.append((canon, "TABLE_MATCHED_EXACT", "exact", 100.0))
                 
-        # 2. Alias match
+        # 2. Alias match (excluding weak aliases)
         if not candidates:
             for canon, aliases in self.config.schema.tables.items():
                 for alias in aliases:
-                    if student_key == normalize_key(alias):
-                        status = "TABLE_MATCHED_ALIAS"
-                        candidates.append((canon, status, "alias", 100.0))
+                    alias_key = normalize_key(alias)
+                    if student_key == alias_key:
+                        if alias_key not in WEAK_TABLE_ALIASES:
+                            candidates.append((canon, "TABLE_MATCHED_ALIAS", "alias", 100.0))
                         
         # 3. Abbreviation match
         if not candidates:
@@ -132,13 +138,22 @@ class NameNormalizer:
                         if expanded == normalize_key(alias):
                             candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
 
+        # 3.5. Weak alias match (ONLY if no stronger candidate exists)
+        if not candidates:
+            for canon, aliases in self.config.schema.tables.items():
+                for alias in aliases:
+                    alias_key = normalize_key(alias)
+                    if student_key == alias_key:
+                        if alias_key in WEAK_TABLE_ALIASES:
+                            candidates.append((canon, "TABLE_MATCHED_WEAK_ALIAS", "weak_alias", 100.0))
+
         # Group and select best mapping method per canonical table
         grouped = {}
         for canon, status, method, score in candidates:
             if canon not in grouped:
                 grouped[canon] = (status, method, score)
             else:
-                pref = {"exact": 3, "alias": 2, "abbreviation": 1}
+                pref = {"exact": 3, "alias": 2, "weak_alias": 1.5, "abbreviation": 1}
                 current_method = grouped[canon][1]
                 if pref.get(method, 0) > pref.get(current_method, 0):
                     grouped[canon] = (status, method, score)
@@ -168,7 +183,6 @@ class NameNormalizer:
                 top_score = fuzzy_candidates[0][3]
                 candidates = [c for c in fuzzy_candidates if c[3] == top_score]
 
-                
         # 5. Output resolution
         if not candidates:
             return {
@@ -178,9 +192,14 @@ class NameNormalizer:
                 "normalized_student_table": normalized,
                 "expanded_student_table": expanded,
                 "compact_student_table": student_key,
+                "normalized_key": student_key,
                 "match_status": "TABLE_UNMAPPED",
                 "match_method": "",
                 "match_score": 0.0,
+                "alias_source": "",
+                "is_weak_alias": False,
+                "duplicate_resolution": "",
+                "selected_mapping_reason": "No candidate found",
                 "candidate_tables": "",
                 "review_required": True,
                 "suggested_alias_entry": f"{raw_table}: []"
@@ -195,16 +214,21 @@ class NameNormalizer:
                 "normalized_student_table": normalized,
                 "expanded_student_table": expanded,
                 "compact_student_table": student_key,
+                "normalized_key": student_key,
                 "match_status": "TABLE_AMBIGUOUS",
                 "match_method": "multiple_matches",
-                "match_score": candidates[0][3],
+                "match_score": 0.0,
+                "alias_source": "",
+                "is_weak_alias": False,
+                "duplicate_resolution": "",
+                "selected_mapping_reason": "Ambiguous matches",
                 "candidate_tables": ";".join(cand_names),
                 "review_required": True,
                 "suggested_alias_entry": suggested
             }
         else:
             canon, status, method, score = candidates[0]
-            review = status in ["TABLE_AMBIGUOUS"]
+            review = status in ["TABLE_AMBIGUOUS", "TABLE_MATCHED_WEAK_ALIAS"]
             suggested = ""
             if status == "TABLE_MATCHED_FUZZY_HIGH":
                 suggested = f"{canon}: [{raw_table}]"
@@ -215,9 +239,14 @@ class NameNormalizer:
                 "normalized_student_table": normalized,
                 "expanded_student_table": expanded,
                 "compact_student_table": student_key,
+                "normalized_key": student_key,
                 "match_status": status,
                 "match_method": method,
                 "match_score": score,
+                "alias_source": method if method in ("exact", "alias", "weak_alias", "abbreviation") else "",
+                "is_weak_alias": status == "TABLE_MATCHED_WEAK_ALIAS",
+                "duplicate_resolution": "",
+                "selected_mapping_reason": f"Matched via {method}",
                 "candidate_tables": canon,
                 "review_required": review,
                 "suggested_alias_entry": suggested
@@ -226,7 +255,7 @@ class NameNormalizer:
     def get_canonical_table(self, physical_name: str) -> str:
         """Resolve physical table name to canonical name. Raises ValueError on ambiguity."""
         res = self.map_table(physical_name)
-        if res["match_status"] in ["TABLE_MATCHED_EXACT", "TABLE_MATCHED_ALIAS", "TABLE_MATCHED_ABBREVIATION", "TABLE_MATCHED_FUZZY_HIGH"]:
+        if res["match_status"] in ["TABLE_MATCHED_EXACT", "TABLE_MATCHED_ALIAS", "TABLE_MATCHED_ABBREVIATION", "TABLE_MATCHED_FUZZY_HIGH", "TABLE_MATCHED_WEAK_ALIAS"]:
             return res["answer_table"]
         if res["match_status"] == "TABLE_AMBIGUOUS":
             raise ValueError(f"Ambiguous table mapping for '{physical_name}': matches {res['candidate_tables']}")
@@ -402,9 +431,14 @@ class NameNormalizer:
                 "normalized_student_column": normalized,
                 "expanded_student_column": expanded,
                 "compact_student_column": student_key,
+                "normalized_key": student_key,
                 "match_status": "COLUMN_UNMAPPED",
                 "match_method": "",
                 "match_score": 0.0,
+                "alias_source": "",
+                "is_weak_alias": False,
+                "duplicate_resolution": "",
+                "selected_mapping_reason": "No match found",
                 "role_guard_result": "",
                 "review_required": True,
                 "suggested_alias_entry": f"by_table:\n  {canonical_table}:\n    (expected_col): [{raw_column}]"
@@ -422,9 +456,14 @@ class NameNormalizer:
                 "normalized_student_column": normalized,
                 "expanded_student_column": expanded,
                 "compact_student_column": student_key,
+                "normalized_key": student_key,
                 "match_status": status,
                 "match_method": method,
                 "match_score": score,
+                "alias_source": method if method in ("exact", "table_alias", "natural_key_alias", "global_alias", "abbreviation") else "",
+                "is_weak_alias": False,
+                "duplicate_resolution": "",
+                "selected_mapping_reason": f"Matched via {method} (role mismatch: {role_res})",
                 "role_guard_result": role_res,
                 "review_required": True,
                 "suggested_alias_entry": ""
@@ -442,9 +481,14 @@ class NameNormalizer:
                 "normalized_student_column": normalized,
                 "expanded_student_column": expanded,
                 "compact_student_column": student_key,
+                "normalized_key": student_key,
                 "match_status": "COLUMN_AMBIGUOUS",
                 "match_method": "multiple_matches",
-                "match_score": compatibles[0][3],
+                "match_score": 0.0,
+                "alias_source": "",
+                "is_weak_alias": False,
+                "duplicate_resolution": "",
+                "selected_mapping_reason": "Ambiguous matches",
                 "role_guard_result": "compatible",
                 "review_required": True,
                 "suggested_alias_entry": suggested
@@ -464,9 +508,14 @@ class NameNormalizer:
             "normalized_student_column": normalized,
             "expanded_student_column": expanded,
             "compact_student_column": student_key,
+            "normalized_key": student_key,
             "match_status": status,
             "match_method": method,
             "match_score": score,
+            "alias_source": method if method in ("exact", "table_alias", "natural_key_alias", "global_alias", "abbreviation") else "",
+            "is_weak_alias": False,
+            "duplicate_resolution": "",
+            "selected_mapping_reason": f"Matched via {method}",
             "role_guard_result": role_res,
             "review_required": review,
             "suggested_alias_entry": suggested

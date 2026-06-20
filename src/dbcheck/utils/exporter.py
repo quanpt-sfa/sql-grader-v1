@@ -10,7 +10,8 @@ REVIEW_STATUSES = {
     "PK_REVIEW_REQUIRED", "FK_REVIEW_REQUIRED", "FK_IMPLIED_REVIEW_REQUIRED",
     "MAPPING_AMBIGUOUS", "VIEW_MAPPING_AMBIGUOUS", "VIEW_OUTPUT_SCHEMA_MISMATCH",
     "TYPE_WARNING", "IDENTIFIER_TYPE_WARNING", "COLUMN_UNMAPPED_STUDENT",
-    "EXTRA_REVIEW", "SURROGATE_KEY_REVIEW", "VIEW_TEST_NOT_RUN"
+    "EXTRA_REVIEW", "SURROGATE_KEY_REVIEW", "VIEW_TEST_NOT_RUN",
+    "TABLE_REVIEW_REQUIRED", "COLUMN_MATCHED_WEAK_ALIAS", "DUPLICATE_MAPPING_REVIEW"
 }
 
 HARD_ERROR_STATUSES = {
@@ -64,6 +65,12 @@ def get_suggested_action(status: str, component: str) -> str:
         return "Verify surrogate key column implementation."
     elif status == "VIEW_TEST_NOT_RUN":
         return "Execute view testing command to obtain correct view outputs."
+    elif status == "TABLE_REVIEW_REQUIRED":
+        return "Verify if the student's weak table alias mapping is correct."
+    elif status == "COLUMN_MATCHED_WEAK_ALIAS":
+        return "Verify if the column mapping is correct despite the weak table alias match."
+    elif status == "DUPLICATE_MAPPING_REVIEW":
+        return "Resolve duplicate column mapping (best match accepted, others demoted)."
     return "Review report details and make any necessary adjustments."
 
 def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> None:
