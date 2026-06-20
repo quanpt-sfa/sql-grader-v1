@@ -39,6 +39,40 @@ dbcheck compare-structure \
 ```powershell
 dbcheck test-views \
   --run-dir "D:\exam\runs\run001" \
-  --test-data "D:\exam\test_data" \
   --config "configs\assignment.yaml"
 ```
+*(Note: `--test-data` is optional and only required when using compare_seeded_test_data mode)*
+
+### 4. Export Results
+```powershell
+dbcheck export-results \
+  --run-dir "D:\exam\runs\run001" \
+  --config "configs\assignment.yaml" \
+  --format xlsx
+```
+
+---
+
+## Backend & Grading Semantics Upgrades
+
+### 1. View Testing - Compare Existing Data
+In `compare_existing_data` mode (default), the checker compares student view queries against answer view queries directly on the restored student and answer databases using their existing data. No seeding is performed.
+
+### 2. Key Adequacy Grading
+Supports natural key and surrogate key designs. If a student uses a surrogate key, it is accepted if business key evidence (presence and uniqueness) is found. Implied relationships and incorrect targets are flagged for manual review.
+
+### 3. Suggested Status Recommendations
+A final suggested status is resolved for each submission based on prioritized rules:
+- `FAIL_RESTORE_OR_SNAPSHOT`: Database restore or introspection failed.
+- `FAIL_STRUCTURE`: Hard structural failures exist (e.g. missing tables, invalid PK/FK).
+- `FAIL_VIEW`: View behaviors mismatch.
+- `FAIL_DATA`: Row count differences exist.
+- `NEEDS_REVIEW`: Manual review recommended (e.g. implied FKs, warning statuses).
+- `PASS_WITH_WARNINGS`: Student database passes but with warnings (e.g. extra columns).
+- `PASS`: Complete pass.
+
+### 4. Aggregated Results
+- `summary.xlsx` / `summary.csv`: Centralized metric dashboard and recommendations.
+- `review_queue.xlsx` / `review_queue.csv`: Filterable list of items requiring manual verification.
+- `hard_errors.csv`: Critical failures.
+- `student_feedback/<submission_id>.md`: Detailed student-facing markdown reports.

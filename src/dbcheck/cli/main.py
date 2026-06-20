@@ -26,7 +26,7 @@ def main():
     # Command: test-views
     view_parser = subparsers.add_parser("test-views", help="Test student view behavior against answer views")
     view_parser.add_argument("--run-dir", required=True, help="Runs directory containing snapshots")
-    view_parser.add_argument("--test-data", required=True, help="Folder containing CSV/SQL test data files")
+    view_parser.add_argument("--test-data", required=False, default=None, help="Folder containing CSV/SQL test data files")
     view_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
     view_parser.add_argument("--answer-bak", help="Optional path to answer database backup file (.bak)")
 
