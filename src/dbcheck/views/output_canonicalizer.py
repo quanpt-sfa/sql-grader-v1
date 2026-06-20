@@ -174,18 +174,18 @@ def canonicalize_view_output(
                 df[canon_name] = df[canon_name].astype(str).str.strip()
                 
         else: # Text/fallback string type
-            # Convert to string, strip whitespace, lowercase, and normalize spaces
-            # Ensure null values do not become string "nan" or "None"
-            mask = df[canon_name].notna()
-            df.loc[mask, canon_name] = (
-                df.loc[mask, canon_name]
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .str.replace(r"\s+", " ", regex=True)
+            # Convert to string, strip whitespace, lowercase, and normalize spaces.
+            # Build the full column with nulls preserved, then assign at once (avoids FutureWarning).
+            series = df[canon_name].astype(object)
+            normalized = series.where(
+                series.isna(),
+                series.astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .str.replace(r"\s+", " ", regex=True)
             )
-            # Make sure truly null values stay NaN
-            df.loc[~mask, canon_name] = np.nan
+            df[canon_name] = normalized
+
             
     # 3. Sort rows deterministically
     sort_cols = view_config.sort_by if view_config.sort_by else expected_names

@@ -15,10 +15,14 @@ def advanced_config():
             "table_ambiguous_threshold": 0.75,
             "column_accept_threshold": 0.88,
             "column_ambiguous_threshold": 0.75,
+            "abbreviations": {
+                "ncc": "NhaCungCap",
+                "kh": "KhachHang"
+            },
             "aliases": {
                 "tables": {
-                    "NhaCungCap": ["NCC", "Supplier"],
-                    "KhachHang": ["KH", "Customer"]
+                    "NhaCungCap": ["Supplier"],
+                    "KhachHang": ["Customer"]
                 },
                 "columns": {
                     "global": {

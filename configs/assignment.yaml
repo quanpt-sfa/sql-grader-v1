@@ -16,6 +16,16 @@ schema:
     allow_bit_integer_compatibility: false
     strict_length_check: false
     strict_precision_scale_check: false
+    identifier_columns:
+      global: ["SoPhieuTraTien", "PhieuMuaHang", "SoHoaDon", "PC", "PMH", "SoHD", "HoaDon", "PhieuChi", "SoPhieuChi", "SoPC", "SoPMH"]
+
+  abbreviations:
+    kh: KhachHang
+    nv: NhanVien
+    hd: HoaDon
+    ncc: NhaCungCap
+    htk: Hang
+
 
   aliases:
     tables:

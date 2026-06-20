@@ -64,6 +64,13 @@ HEADERS = {
         "column_name",
         "column_name_canonical",
         "data_type"
+    ],
+    "unique_constraints": [
+        "submission_id",
+        "table_name_canonical",
+        "constraint_name",
+        "column_name_canonical",
+        "key_ordinal"
     ]
 }
 

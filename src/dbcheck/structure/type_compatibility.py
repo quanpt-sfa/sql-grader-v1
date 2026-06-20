@@ -58,10 +58,55 @@ def get_type_group(sql_type: str) -> str:
     return _TYPE_TO_GROUP.get(norm, "unknown")
 
 
+def is_numeric_integer_like(sql_type: str, scale: Optional[int] = None) -> bool:
+    """Return True if sql_type is a decimal/numeric with scale = 0."""
+    norm = normalize_sql_type(sql_type)
+    if norm not in ["decimal", "numeric"]:
+        return False
+    if scale is not None:
+        return scale == 0
+    # Try to parse scale from type string, e.g., decimal(18,0)
+    match = re.search(r"\(\s*\d+\s*,\s*(\d+)\s*\)", sql_type)
+    if match:
+        try:
+            return int(match.group(1)) == 0
+        except ValueError:
+            pass
+    return False
+
+
+def is_identifier_column(
+    column_name: str,
+    participates_in_pk_fk: bool = False,
+    global_identifiers: Optional[list] = None,
+    table_identifiers: Optional[list] = None
+) -> bool:
+    """Identify if a column serves as a key or identifier."""
+    if not column_name:
+        return False
+    if participates_in_pk_fk:
+        return True
+    name_l = column_name.lower()
+    if any(k in name_l for k in ["ma", "id", "code", "key"]):
+        return True
+    if table_identifiers:
+        if any(x.lower() == name_l for x in table_identifiers):
+            return True
+    if global_identifiers:
+        if any(x.lower() == name_l for x in global_identifiers):
+            return True
+    return False
+
+
 def compare_sql_types(
     answer_type: str,
     student_type: str,
-    config: Any = None
+    config: Any = None,
+    column_name: str = "",
+    participates_in_pk_fk: bool = False,
+    answer_scale: Optional[int] = None,
+    student_scale: Optional[int] = None,
+    table_name: str = ""
 ) -> Dict[str, Any]:
     """
     Compare two SQL Server column types and return a structured result dict.
@@ -75,18 +120,26 @@ def compare_sql_types(
             "answer_type_group":        str,
             "student_type_group":       str,
             "type_status":              str,   # TYPE_MATCH_EXACT | TYPE_MATCH_GROUP |
-                                               # TYPE_COMPATIBLE_WARNING | TYPE_MISMATCH
+                                               # TYPE_COMPATIBLE_WARNING | TYPE_IDENTIFIER_COMPATIBLE_WARNING | TYPE_MISMATCH
             "type_score":               float,
             "reason":                   str,
         }
     """
     # Read type_compatibility section from config if available
     tc: Dict[str, Any] = {}
+    global_identifiers = []
+    table_identifiers = []
     if config is not None and hasattr(config, "type_compatibility"):
-        tc = config.type_compatibility.__dict__ if hasattr(config.type_compatibility, "__dict__") else {}
+        tc_obj = config.type_compatibility
+        tc = tc_obj.__dict__ if hasattr(tc_obj, "__dict__") else {}
+        global_identifiers = getattr(tc_obj, "identifier_columns_global", [])
+        by_table = getattr(tc_obj, "identifier_columns_by_table", {})
+        if table_name and by_table:
+            table_identifiers = by_table.get(table_name.lower(), [])
 
     mode: str = tc.get("mode", "group_with_warnings")
     warning_score: float = float(tc.get("compatible_warning_score", 0.75))
+    allow_id_int_text: bool = bool(tc.get("allow_identifier_integer_text_compatibility", True))
     allow_int_decimal: bool = bool(tc.get("allow_integer_decimal_compatibility", True))
     allow_dec_float: bool = bool(tc.get("allow_decimal_float_compatibility", True))
     allow_bit_int: bool = bool(tc.get("allow_bit_integer_compatibility", False))
@@ -126,7 +179,30 @@ def compare_sql_types(
             status, 1.0, reason
         )
 
-    # 3. Cross-group compatibility warnings
+    # 3. Identifier compatibility (Warning instead of hard mismatch)
+    if allow_id_int_text and is_identifier_column(column_name, participates_in_pk_fk, global_identifiers, table_identifiers):
+        def get_identifier_set(sql_type: str, group: str, scale: Optional[int]) -> Optional[str]:
+            norm = normalize_sql_type(sql_type)
+            if group == "integer":
+                return "integer"
+            if group == "text" and norm in ["char", "varchar", "nchar", "nvarchar"]:
+                return "text"
+            if is_numeric_integer_like(sql_type, scale):
+                return "numeric_int"
+            return None
+
+        ans_set = get_identifier_set(answer_type, ans_group, answer_scale)
+        stu_set = get_identifier_set(student_type, stu_group, student_scale)
+
+        if ans_set is not None and stu_set is not None:
+            if ans_set != stu_set:
+                return _result(
+                    answer_type, student_type, ans_norm, stu_norm, ans_group, stu_group,
+                    "TYPE_IDENTIFIER_COMPATIBLE_WARNING", warning_score,
+                    f"Identifier compatible warning: {ans_set} ↔ {stu_set} on '{column_name}'"
+                )
+
+    # 4. Cross-group compatibility warnings (for non-identifier columns or fallback)
     pair = frozenset([ans_group, stu_group])
 
     # decimal ↔ floating
@@ -171,7 +247,7 @@ def compare_sql_types(
             "boolean ↔ integer not allowed by default config"
         )
 
-    # 4. Hard mismatch for all other cross-group pairs
+    # 5. Hard mismatch for all other cross-group pairs
     return _result(
         answer_type, student_type, ans_norm, stu_norm, ans_group, stu_group,
         "TYPE_MISMATCH", 0.0,

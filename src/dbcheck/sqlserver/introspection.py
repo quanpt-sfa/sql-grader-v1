@@ -271,3 +271,43 @@ def get_view_columns(db_conn: SQLServerConnection, db_name: str, submission_id: 
             "data_type": r["data_type"]
         })
     return view_cols
+
+
+def get_unique_constraints(db_conn: SQLServerConnection, db_name: str, submission_id: str, normalizer: NameNormalizer) -> List[Dict[str, Any]]:
+    sql = """
+    SELECT 
+        t.name as table_name,
+        i.name as index_name,
+        c.name as column_name,
+        ic.key_ordinal
+    FROM sys.indexes i
+    JOIN sys.tables t ON i.object_id = t.object_id
+    JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+    JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+    WHERE i.is_unique = 1 AND t.is_ms_shipped = 0;
+    """
+    rows = db_conn.execute_query(sql, db_name=db_name)
+    uniques = []
+    for r in rows:
+        table_name = r["table_name"]
+        column_name = r["column_name"]
+        
+        try:
+            table_canon = normalizer.get_canonical_table(table_name)
+        except ValueError:
+            table_canon = "AMBIGUOUS_TABLE"
+            
+        try:
+            column_canon = normalizer.get_canonical_column(column_name, table_canon)
+        except ValueError:
+            column_canon = "AMBIGUOUS_COLUMN"
+            
+        uniques.append({
+            "submission_id": submission_id,
+            "table_name_canonical": table_canon,
+            "constraint_name": r["index_name"],
+            "column_name_canonical": column_canon,
+            "key_ordinal": r["key_ordinal"]
+        })
+    return uniques
+

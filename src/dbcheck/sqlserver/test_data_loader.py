@@ -97,8 +97,15 @@ def seed_database(
         logger.warning(f"No CSV test data files found in: {test_data_dir}")
         return
         
-    # Map CSV name (canonical table) to path
-    csv_map = {f.stem.lower(): f for f in csv_files}
+    # Map CSV name (canonical table) to path using normalizer
+    csv_map = {}
+    for f in csv_files:
+        stem = f.stem
+        try:
+            t_canon = normalizer.get_canonical_table(stem)
+            csv_map[t_canon.lower()] = f
+        except ValueError:
+            csv_map[stem.lower()] = f
     
     # Check which tables are accepted
     accepted_statuses = {"TABLE_MATCHED_EXACT", "TABLE_MATCHED_ALIAS", "TABLE_MATCHED_ABBREVIATION", "TABLE_MATCHED_FUZZY_HIGH"}
@@ -249,10 +256,14 @@ def seed_database(
             
             # Identify if there is an identity column we are inserting into
             has_identity = False
-            for col_canon_l in rows[0].keys():
-                col_canon_l = col_canon_l.lower()
+            for k in rows[0].keys():
+                try:
+                    k_canon = normalizer.get_canonical_column(k, t_canon)
+                    col_canon_l = k_canon.lower()
+                except ValueError:
+                    col_canon_l = k.lower()
                 meta = col_meta.get((t_canon_l, col_canon_l))
-                if meta and meta.get("is_identity") == 1:
+                if meta and int(meta.get("is_identity") or 0) == 1:
                     has_identity = True
                     break
                     
@@ -264,7 +275,11 @@ def seed_database(
                 insert_cols = []
                 values = []
                 for k, v in row.items():
-                    k_l = k.lower()
+                    try:
+                        k_canon = normalizer.get_canonical_column(k, t_canon)
+                        k_l = k_canon.lower()
+                    except ValueError:
+                        k_l = k.lower()
                     if k_l in phys_cols:
                         insert_cols.append(phys_cols[k_l])
                         values.append(parse_val(v))

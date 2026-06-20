@@ -1,0 +1,204 @@
+assignment:
+  name: "Purchase-Payment REA Assignment Grade Config"
+  protected_answer_db: "00000001"
+
+schema:
+  key_grading:
+    mode: adequacy
+    allow_surrogate_keys: true
+    allow_natural_keys: true
+    require_business_key_uniqueness: false
+    surrogate_key_patterns:
+      - id
+      - "{table}id"
+      - "{table}_id"
+    natural_key_aliases:
+      HangHoa:
+        MaHangHoa: [MaHang, MaHTK]
+      LoaiTien:
+        MaLoaiTien: [MaTien, LoaiTien]
+      NhanVien:
+        MaNhanVien: [MaNV]
+      NhaCungCap:
+        MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap]
+      MuaHang:
+        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD]
+      TraTien:
+        SoPhieuTraTien: [PC, SoPC, PhieuChi, SoPhieuChi]
+      ChiTietMuaHang:
+        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD]
+        MaHangHoa: [MaHang, MaHTK]
+      ChiTietTraTien:
+        SoPhieuTraTien: [PC, SoPC, PhieuChi, SoPhieuChi]
+        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD]
+        MaLoaiTien: [MaTien, LoaiTien]
+
+  matching_threshold: 0.8
+  excluded_tables:
+    - sysdiagrams
+    - Stage_MuaHang
+    - Stage_TraTien
+  type_compatibility:
+    mode: group_with_warnings
+    compatible_warning_score: 0.75
+    allow_identifier_integer_text_compatibility: true
+    allow_integer_decimal_compatibility: true
+    allow_decimal_float_compatibility: true
+    allow_bit_integer_compatibility: false
+    strict_length_check: false
+    strict_precision_scale_check: false
+    identifier_columns:
+      global: ["SoPhieuTraTien", "PhieuMuaHang", "SoHoaDon", "PC", "PMH", "SoHD", "HoaDon", "PhieuChi", "SoPhieuChi", "SoPC", "SoPMH"]
+
+  abbreviations:
+    ncc: NhaCungCap
+    htk: HangHoa
+    nv: NhanVien
+    kh: KhachHang
+    mh: MuaHang
+    hd: HoaDon
+    pc: PhieuChi
+
+
+  aliases:
+    tables:
+      HangHoa: [Hang, HangTonKho, HTK, Product, Inventory, "01. HTK", "01.HangTonKho", "01. HTK (Hang hoa)", "01. HangTonKho"]
+      LoaiTien: [Tien, LoaiTien, Currency, Money, "02.Tien", "02.TIEN", "02. LoaiTien"]
+      NhanVien: [NhanVien, NV, Employee, "03.NhanVien", "03. NhanVien"]
+      NhaCungCap: [NCC, NhaCungCap, NguoiCungCap, NguoiBan, Supplier, Vendor, NB, "04. NCC", "04.NCC", "04. NhaCungCap"]
+      MuaHang: [MuaHang, Muahangg, PhieuMuaHang, PMH, Purchase, PurchaseInvoice, "05.MUAHANG", "05.Muahangg", "05. MuaHang", HD, HoaDon, SoHoaDon]
+      ChiTietMuaHang: [ChiTietMuaHang, CT_MuaHang, CTMuaHang, PurchaseDetail, "06. CT_MUAHANG", "06.CT_MuaHang", "06. ChiTietMuaHang"]
+      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien"]
+      ChiTietTraTien: [ChiTietTraTien, CT_ChiTien, CTChiTien, PaymentDetail, "08.CT_CHITIEN", "08.CT_ChiTien", "08. ChiTietTraTien"]
+    columns:
+      global: {}
+      by_table:
+        HangHoa:
+          MaHangHoa: [MaHang, MaHTK, ProductID]
+          TenHangHoa: [TenHang, TenHTK, ProductName]
+        LoaiTien:
+          MaLoaiTien: [MaTien, LoaiTien, CurrencyID]
+          TenLoaiTien: [TenTien, TenLoaiTien, CurrencyName]
+        NhaCungCap:
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap, SupplierID, VendorID]
+          TenNhaCungCap: [TenNCC, TenNB, TenNguoiBan, TenNguoiCungCap, SupplierName, VendorName]
+        MuaHang:
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, HoaDon, InvoiceNo]
+          NgayMuaHang: [Ngay, NgayMH, PurchaseDate]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan]
+          MaNhanVien: [MaNV]
+          MaLoaiTien: [LoaiTien, MaTien]
+        ChiTietMuaHang:
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon]
+          MaHangHoa: [MaHang, MaHTK]
+          SoLuong: [SL, Quantity, Qty]
+          DonGia: [Gia, UnitPrice]
+          TienThue: [Thue, Tax]
+        TraTien:
+          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC]
+          NgayTra: [Ngay, NgayChi, PaymentDate]
+          MaNhanVien: [MaNV]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan]
+          MaLoaiTien: [LoaiTien, MaTien]
+        ChiTietTraTien:
+          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon]
+          MaLoaiTien: [LoaiTien, MaTien]
+          SoTienTra: [SoTien, TienTra, AmountPaid, TongTienTra, TongTien]
+        NhanVien:
+          MaNhanVien: [MaNV]
+          TenNhanVien: [TenNV, EmployeeName]
+
+views:
+  mode: answer_snapshot
+  execution_mode: compare_existing_data
+  export_outputs: true
+  compare_as_multiset: true
+  expected:
+    - answer_view: "Cau1"
+      answer_required: true
+      student_required: true
+      check_mode: "full"
+      order_sensitive: false
+      expected_output:
+        columns:
+          - canonical: "TenNhaCungCap"
+            type: "text"
+            aliases: ["Tên nhà cung cấp", "TenNhaCungCap", "TenNCC", "Tên NCC"]
+          - canonical: "DiaChi"
+            type: "text"
+            aliases: ["Địa chỉ", "DiaChi"]
+          - canonical: "KhuVuc"
+            type: "text"
+            aliases: ["Khu vực", "Khu Vực", "KhuVuc"]
+        sort_by: ["TenNhaCungCap"]
+        numeric_tolerance: 0.01
+
+    - answer_view: "Cau2"
+      answer_required: true
+      student_required: true
+      check_mode: "full"
+      order_sensitive: true
+      expected_output:
+        columns:
+          - canonical: "TenHangHoa"
+            type: "text"
+            aliases: ["Sản phẩm", "TenHangHoa", "TenHang"]
+          - canonical: "DonViTinh"
+            type: "text"
+            aliases: ["Đơn vị tính", "DonViTinh", "DVT"]
+          - canonical: "SoLuong"
+            type: "number"
+            aliases: ["Tổng số lượng", "SoLuong", "SL", "TongSoLuong"]
+        sort_by: ["SoLuong"]
+        numeric_tolerance: 0.01
+
+    - answer_view: "Cau3"
+      answer_required: true
+      student_required: true
+      check_mode: "full"
+      order_sensitive: false
+      expected_output:
+        columns:
+          - canonical: "TenNhaCungCap"
+            type: "text"
+            aliases: ["Tên Nhà cung cấp", "Tên nhà cung cấp", "TenNhaCungCap", "TenNCC"]
+          - canonical: "KhuVuc"
+            type: "text"
+            aliases: ["Khu vực", "Khu Vực", "KhuVuc"]
+          - canonical: "NoPhaiTra"
+            type: "number"
+            aliases: ["Nợ phải trả", "PhaiTra", "NoPhaiTra"]
+          - canonical: "NoDaTra"
+            type: "number"
+            aliases: ["Nợ đã trả", "DaTra", "NoDaTra"]
+          - canonical: "ConLai"
+            type: "number"
+            aliases: ["Còn lại", "ConLai"]
+        sort_by: ["TenNhaCungCap"]
+        numeric_tolerance: 0.01
+
+    - answer_view: "Cau4"
+      answer_required: false
+      student_required: true
+      check_mode: "execution_only"
+      order_sensitive: false
+      expected_output:
+        columns:
+          - canonical: "PhieuMuaHang"
+            type: "text"
+            aliases: ["PhieuMuaHang", "PMH", "SoHoaDon", "MaHD"]
+          - canonical: "NgayMuaHang"
+            type: "date"
+            aliases: ["NgayMuaHang", "NgayMua", "Ngay", "NgayHD"]
+          - canonical: "MaNhaCungCap"
+            type: "text"
+            aliases: ["MaNhaCungCap", "MaNCC"]
+          - canonical: "MaNhanVien"
+            type: "text"
+            aliases: ["MaNhanVien", "MaNV"]
+          - canonical: "MaLoaiTien"
+            type: "text"
+            aliases: ["MaLoaiTien", "LoaiTien", "MaTien"]
+        sort_by: ["PhieuMuaHang"]
+        numeric_tolerance: 0.01

@@ -52,30 +52,24 @@ class NameNormalizer:
         return cleaned
 
     def _expand_abbreviations(self, cleaned_name: str) -> str:
-        """Expand standard Vietnamese database abbreviations."""
+        """Expand standard generic database abbreviations and configured abbreviations."""
         expanded = cleaned_name
         expanded = re.sub(r'\bct[_\s]+', 'chitiet', expanded)
         expanded = re.sub(r'\bct\b', 'chitiet', expanded)
         expanded = re.sub(r'^(ct)(?=[a-z])', 'chitiet', expanded)
-        
-        expanded = re.sub(r'ncc$', 'nhacungcap', expanded)
-        expanded = re.sub(r'^ncc', 'nhacungcap', expanded)
-        expanded = re.sub(r'htk$', 'hangtonkho', expanded)
-        expanded = re.sub(r'^htk', 'hangtonkho', expanded)
-        expanded = re.sub(r'nv$', 'nhanvien', expanded)
-        expanded = re.sub(r'^nv', 'nhanvien', expanded)
-        expanded = re.sub(r'kh$', 'khachhang', expanded)
-        expanded = re.sub(r'^kh', 'khachhang', expanded)
-        expanded = re.sub(r'hd$', 'hoadon', expanded)
-        expanded = re.sub(r'^hd', 'hoadon', expanded)
-        
-        expanded = re.sub(r'pmh$', 'phieumuahang', expanded)
-        expanded = re.sub(r'^pmh', 'phieumuahang', expanded)
-        expanded = re.sub(r'phieumh$', 'phieumuahang', expanded)
-        expanded = re.sub(r'^phieumh', 'phieumuahang', expanded)
-        expanded = re.sub(r'ctmh$', 'chitietmuahang', expanded)
-        expanded = re.sub(r'^ctmh', 'chitietmuahang', expanded)
-        
+
+        # Expand configured domain abbreviations
+        abbs = getattr(self.config.schema, "abbreviations", {}) if hasattr(self.config, "schema") else {}
+        for abb, full in abbs.items():
+            abb_l = abb.lower()
+            full_l = full.lower()
+            if expanded == abb_l:
+                expanded = full_l
+            else:
+                expanded = re.sub(rf'\b{re.escape(abb_l)}\b', full_l, expanded)
+                expanded = re.sub(rf'{re.escape(abb_l)}$', full_l, expanded)
+                expanded = re.sub(rf'^{re.escape(abb_l)}', full_l, expanded)
+
         # Remove all separators for unified match
         expanded = re.sub(r'[_\s\-]+', '', expanded)
         return expanded
@@ -90,29 +84,42 @@ class NameNormalizer:
         # 1. Exact match on canonical table name
         for canon in self.config.schema.tables.keys():
             canon_l = canon.lower()
-            if normalized == canon_l or expanded == canon_l:
-                status = "TABLE_MATCHED_ABBREVIATION" if (len(normalized) <= 3 and normalized != canon_l) else "TABLE_MATCHED_EXACT"
-                candidates.append((canon, status, "exact", 100.0))
+            if normalized == canon_l:
+                candidates.append((canon, "TABLE_MATCHED_EXACT", "exact", 100.0))
                 
         # 2. Alias match
-        for canon, aliases in self.config.schema.tables.items():
-            for alias in aliases:
-                alias_l = alias.lower()
-                if normalized == alias_l or expanded == alias_l:
-                    status = "TABLE_MATCHED_ABBREVIATION" if (len(normalized) <= 3 and normalized != alias_l) else "TABLE_MATCHED_ALIAS"
-                    candidates.append((canon, status, "alias", 100.0))
-                    
-        # 3. Abbreviation match (length <= 3)
-        if len(normalized) <= 3:
+        if not candidates:
             for canon, aliases in self.config.schema.tables.items():
-                canon_l = canon.lower()
-                if expanded == canon_l:
-                    candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 for alias in aliases:
                     alias_l = alias.lower()
-                    if expanded == alias_l:
-                        candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                    if normalized == alias_l:
+                        status = "TABLE_MATCHED_ALIAS"
+                        candidates.append((canon, status, "alias", 100.0))
                         
+        # 3. Abbreviation match
+        if not candidates:
+            expanded = self._expand_abbreviations(normalized)
+            # A. Configured abbreviation expansion match
+            if expanded != normalized:
+                for canon in self.config.schema.tables.keys():
+                    if expanded == canon.lower():
+                        candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                for canon, aliases in self.config.schema.tables.items():
+                    for alias in aliases:
+                        if expanded == alias.lower():
+                            candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+            
+            # B. Legacy abbreviation match (length <= 3)
+            if not candidates and len(normalized) <= 3:
+                for canon, aliases in self.config.schema.tables.items():
+                    canon_l = canon.lower()
+                    if expanded == canon_l:
+                        candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                    for alias in aliases:
+                        alias_l = alias.lower()
+                        if expanded == alias_l:
+                            candidates.append((canon, "TABLE_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+
         # Group and select best mapping method per canonical table
         grouped = {}
         for canon, status, method, score in candidates:
@@ -128,6 +135,7 @@ class NameNormalizer:
         
         # 4. Fuzzy fallback (only if length > 3 and no exact/alias/abbreviation match)
         if not candidates and len(normalized) > 3:
+            expanded = self._expand_abbreviations(normalized)
             fuzzy_candidates = []
             for canon, aliases in self.config.schema.tables.items():
                 s_raw = fuzz.ratio(normalized, canon.lower())
@@ -147,6 +155,7 @@ class NameNormalizer:
                 fuzzy_candidates.sort(key=lambda x: x[3], reverse=True)
                 top_score = fuzzy_candidates[0][3]
                 candidates = [c for c in fuzzy_candidates if c[3] == top_score]
+
                 
         # 5. Output resolution
         if not candidates:
@@ -229,35 +238,65 @@ class NameNormalizer:
         table_aliases = self.config.schema.columns_by_table.get(canonical_table, {}) if canonical_table else {}
         global_aliases = self.config.schema.columns_global
         
+        natural_aliases = {}
+        if hasattr(self.config.schema, "key_grading"):
+            natural_aliases = self.config.schema.key_grading.natural_key_aliases.get(canonical_table, {})
+            
         candidates = []
         
         # 1. Exact match with canonical column name
         for col_meta in expected_cols:
             canon_col = col_meta["column_name"]
             canon_col_l = canon_col.lower()
-            if normalized == canon_col_l or expanded == canon_col_l:
-                status = "COLUMN_MATCHED_ABBREVIATION" if (len(normalized) <= 3 and normalized != canon_col_l) else "COLUMN_MATCHED_EXACT"
-                candidates.append((canon_col, status, "exact", 100.0))
+            if normalized == canon_col_l:
+                candidates.append((canon_col, "COLUMN_MATCHED_EXACT", "exact", 100.0))
                 
-        # 2. Alias match (Table-scoped, then Global)
+        # 2. Alias match (Table-scoped, then Natural Key, then Global)
         for col_meta in expected_cols:
             canon_col = col_meta["column_name"]
             
+            # A. Explicit table alias
             t_aliases = table_aliases.get(canon_col, [])
             for alias in t_aliases:
                 alias_l = alias.lower()
-                if normalized == alias_l or expanded == alias_l:
-                    status = "COLUMN_MATCHED_ABBREVIATION" if (len(normalized) <= 3 and normalized != alias_l) else "COLUMN_MATCHED_ALIAS"
-                    candidates.append((canon_col, status, "table_alias", 100.0))
+                if normalized == alias_l:
+                    candidates.append((canon_col, "COLUMN_MATCHED_ALIAS", "table_alias", 100.0))
+            
+            # B. Natural key alias
+            nk_aliases = natural_aliases.get(canon_col, [])
+            for alias in nk_aliases:
+                alias_l = alias.lower()
+                if normalized == alias_l:
+                    candidates.append((canon_col, "COLUMN_MATCHED_ALIAS", "natural_key_alias", 100.0))
                     
+            # C. Global alias
             g_aliases = global_aliases.get(canon_col, [])
             for alias in g_aliases:
                 alias_l = alias.lower()
-                if normalized == alias_l or expanded == alias_l:
-                    status = "COLUMN_MATCHED_ABBREVIATION" if (len(normalized) <= 3 and normalized != alias_l) else "COLUMN_MATCHED_ALIAS"
-                    candidates.append((canon_col, status, "global_alias", 100.0))
-                    
-        # 3. Abbreviation match (length <= 3)
+                if normalized == alias_l:
+                    candidates.append((canon_col, "COLUMN_MATCHED_ALIAS", "global_alias", 100.0))
+                        
+        # 3. Abbreviation match
+        expanded = self._expand_abbreviations(normalized)
+        if expanded != normalized:
+            for col_meta in expected_cols:
+                canon_col = col_meta["column_name"]
+                if expanded == canon_col.lower():
+                    candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                t_aliases = table_aliases.get(canon_col, [])
+                for alias in t_aliases:
+                    if expanded == alias.lower():
+                        candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                nk_aliases = natural_aliases.get(canon_col, [])
+                for alias in nk_aliases:
+                    if expanded == alias.lower():
+                        candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                g_aliases = global_aliases.get(canon_col, [])
+                for alias in g_aliases:
+                    if expanded == alias.lower():
+                        candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+        
+        # Legacy abbreviation match (length <= 3)
         if len(normalized) <= 3:
             for col_meta in expected_cols:
                 canon_col = col_meta["column_name"]
@@ -266,6 +305,10 @@ class NameNormalizer:
                     candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 t_aliases = table_aliases.get(canon_col, [])
                 for alias in t_aliases:
+                    if expanded == alias.lower():
+                        candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
+                nk_aliases = natural_aliases.get(canon_col, [])
+                for alias in nk_aliases:
                     if expanded == alias.lower():
                         candidates.append((canon_col, "COLUMN_MATCHED_ABBREVIATION", "abbreviation", 100.0))
                 g_aliases = global_aliases.get(canon_col, [])
@@ -279,15 +322,23 @@ class NameNormalizer:
             if canon not in grouped:
                 grouped[canon] = (status, method, score)
             else:
-                pref = {"exact": 4, "table_alias": 3, "global_alias": 2, "abbreviation": 1}
+                pref = {
+                    "table_alias": 5,
+                    "natural_key_alias": 4,
+                    "exact": 3,
+                    "global_alias": 2,
+                    "abbreviation": 1
+                }
                 current_method = grouped[canon][1]
                 if pref.get(method, 0) > pref.get(current_method, 0):
                     grouped[canon] = (status, method, score)
                     
         candidates = [(k, v[0], v[1], v[2]) for k, v in grouped.items()]
+
         
         # 4. Fuzzy fallback (only if length > 3 and no exact/alias/abbreviation match)
         if not candidates and len(normalized) > 3:
+            expanded = self._expand_abbreviations(normalized)
             fuzzy_candidates = []
             for col_meta in expected_cols:
                 canon_col = col_meta["column_name"]

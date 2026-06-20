@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Set
 from dbcheck.snapshot.reader import read_full_snapshot
 from dbcheck.snapshot.normalizer import NameNormalizer
-from dbcheck.structure.constraint_checker import match_constraints
+from dbcheck.structure.constraint_checker import match_constraints, is_surrogate_column
 from dbcheck.structure.view_matcher import match_views_structure
 from dbcheck.structure.type_compatibility import compare_sql_types
 from dbcheck.utils.logging import get_logger
@@ -22,6 +22,7 @@ COLUMN_MAP_HEADERS = [
     "raw_student_column", "normalized_student_column", "expanded_student_column",
     "match_status", "match_method", "match_score",
     "answer_type", "student_type",
+    "answer_type_raw", "student_type_raw",
     "answer_type_group", "student_type_group",
     "type_status", "type_score", "type_reason",
     "role_guard_result", "review_required", "suggested_alias_entry"
@@ -213,14 +214,39 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
         # Type comparison using type_compatibility module
         for cm in table_col_mappings:
             if cm["match_status"].startswith("COLUMN_MATCHED"):
+                canon_c = cm["answer_column"]
+                ans_col_meta = next((c for c in expected_cols if c["column_name"] == canon_c), None)
+                stu_col_meta = next((c for c in student_cols if c["column_name"] == cm.get("student_column")), None)
+                
+                answer_scale = ans_col_meta.get("scale") if ans_col_meta else None
+                student_scale = stu_col_meta.get("scale") if stu_col_meta else None
+                
+                is_pk = any(
+                    k.get("table_name_canonical") == canon_t and k.get("column_name_canonical") == canon_c
+                    for k in ans_pks_active
+                )
+                is_fk = any(
+                    (k.get("parent_table_canonical") == canon_t and k.get("parent_column_canonical") == canon_c) or
+                    (k.get("referenced_table_canonical") == canon_t and k.get("referenced_column_canonical") == canon_c)
+                    for k in ans_fks_active
+                )
+                is_pk_fk = is_pk or is_fk
+                
                 type_result = compare_sql_types(
-                    cm["answer_type"], cm["student_type"], config
+                    cm["answer_type"], cm["student_type"], config,
+                    column_name=canon_c,
+                    participates_in_pk_fk=is_pk_fk,
+                    answer_scale=answer_scale,
+                    student_scale=student_scale,
+                    table_name=canon_t
                 )
                 cm["answer_type_group"]   = type_result["answer_type_group"]
                 cm["student_type_group"]  = type_result["student_type_group"]
                 cm["type_status"]         = type_result["type_status"]
                 cm["type_score"]          = type_result["type_score"]
                 cm["type_reason"]         = type_result["reason"]
+                cm["answer_type_raw"]     = cm["answer_type"]
+                cm["student_type_raw"]    = cm["student_type"]
 
                 # Hard mismatch → demote the column match status
                 if type_result["type_status"] == "TYPE_MISMATCH":
@@ -232,6 +258,8 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                 cm.setdefault("type_status", "")
                 cm.setdefault("type_score", 0.0)
                 cm.setdefault("type_reason", "")
+                cm.setdefault("answer_type_raw", cm.get("answer_type", ""))
+                cm.setdefault("student_type_raw", cm.get("student_type", ""))
 
         # Unmapped → Extra if all expected columns are covered
         mapped_cols_in_table: Set[str] = {
@@ -263,6 +291,8 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                     "match_score": 0.0,
                     "answer_type": col_meta.get("data_type", ""),
                     "student_type": "",
+                    "answer_type_raw": col_meta.get("data_type", ""),
+                    "student_type_raw": "",
                     "answer_type_group": "",
                     "student_type_group": "",
                     "type_status": "",
@@ -301,6 +331,23 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                 "message": f"Table matched by {m['match_method']}",
                 "evidence": f"Score: {m['match_score']}"
             })
+            # Row count mismatch warning
+            canon_t = m["answer_table"]
+            phys_t = m["student_table"]
+            ans_row_meta = next((t for t in ans_tables_active if (t.get("table_name_canonical") or t.get("table_name")) == canon_t), None)
+            stu_row_meta = next((t for t in stu_tables_active if t["table_name"] == phys_t), None)
+            ans_rows = ans_row_meta.get("row_count", 0) if ans_row_meta else 0
+            stu_rows = stu_row_meta.get("row_count", 0) if stu_row_meta else 0
+            if ans_rows != stu_rows:
+                structure_results.append({
+                    "component": "table",
+                    "answer_object": m.get("raw_answer_table") or canon_t,
+                    "student_object": phys_t,
+                    "status": "ROW_COUNT_MISMATCH",
+                    "severity": "warning",
+                    "message": f"Row count mismatch for table '{phys_t}': expected {ans_rows}, got {stu_rows}",
+                    "evidence": f"expected={ans_rows}, got={stu_rows}"
+                })
         elif status == "TABLE_MISSING_ANSWER":
             structure_results.append({
                 "component": "table",
@@ -349,35 +396,94 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
         type_ev  = f"ans_group={cm.get('answer_type_group','')}, stu_group={cm.get('student_type_group','')}, score={cm.get('type_score','')}"
 
         if status.startswith("COLUMN_MATCHED"):
-            structure_results.append({
-                "component": "column",
-                "answer_object": ans_obj,
-                "student_object": stud_obj,
-                "status": "PASS",
-                "severity": "info",
-                "message": f"Column matched by {cm['match_method']}",
-                "evidence": f"Mapped '{cm.get('student_column','')}' to '{cm.get('answer_column','')}'"
-            })
+            type_stat = cm.get("type_status", "")
+            if type_stat == "TYPE_IDENTIFIER_COMPATIBLE_WARNING":
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": ans_obj,
+                    "student_object": stud_obj,
+                    "status": "IDENTIFIER_TYPE_WARNING",
+                    "severity": "warning",
+                    "message": (
+                        f"Identifier type warning for '{cm.get('answer_column','')}': "
+                        f"expected '{cm.get('answer_type','')}', "
+                        f"got '{cm.get('student_type','')}'"
+                    ),
+                    "evidence": cm.get("type_reason", "")
+                })
+            elif type_stat == "TYPE_COMPATIBLE_WARNING":
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": ans_obj,
+                    "student_object": stud_obj,
+                    "status": "TYPE_WARNING",
+                    "severity": "warning",
+                    "message": (
+                        f"Type warning for '{cm.get('answer_column','')}': "
+                        f"expected '{cm.get('answer_type','')}', "
+                        f"got '{cm.get('student_type','')}'"
+                    ),
+                    "evidence": cm.get("type_reason", "")
+                })
+            else:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": ans_obj,
+                    "student_object": stud_obj,
+                    "status": "PASS",
+                    "severity": "info",
+                    "message": f"Column matched by {cm['match_method']}",
+                    "evidence": f"Mapped '{cm.get('student_column','')}' to '{cm.get('answer_column','')}'"
+                })
         elif status == "COLUMN_MISSING_ANSWER":
-            structure_results.append({
-                "component": "column",
-                "answer_object": ans_obj,
-                "student_object": "",
-                "status": "MISSING",
-                "severity": "high",
-                "message": f"Required column '{cm.get('answer_column','')}' is missing in table '{cm['answer_table']}'",
-                "evidence": ""
-            })
+            is_miss_surr = is_surrogate_column(cm.get("answer_column",""), cm["answer_table"], 0, config)
+            if hasattr(config.schema, "key_grading") and config.schema.key_grading.mode == "adequacy" and is_miss_surr:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": ans_obj,
+                    "student_object": "",
+                    "status": "SURROGATE_KEY_IGNORED",
+                    "severity": "info",
+                    "message": f"Answer surrogate column '{cm.get('answer_column','')}' is ignored since student uses natural key.",
+                    "evidence": ""
+                })
+            else:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": ans_obj,
+                    "student_object": "",
+                    "status": "MISSING",
+                    "severity": "high",
+                    "message": f"Required column '{cm.get('answer_column','')}' is missing in table '{cm['answer_table']}'",
+                    "evidence": ""
+                })
         elif status == "COLUMN_EXTRA_STUDENT":
-            structure_results.append({
-                "component": "column",
-                "answer_object": "",
-                "student_object": stud_obj,
-                "status": "EXTRA",
-                "severity": "low",
-                "message": f"Extra column '{cm.get('student_column','')}' in table '{cm['student_table']}'",
-                "evidence": ""
-            })
+            stu_identity = 0
+            for sc in stu_cols_active:
+                if sc.get("table_name") == cm["student_table"] and sc.get("column_name") == cm.get("student_column"):
+                    stu_identity = sc.get("is_identity", 0)
+                    break
+            is_extra_surr = is_surrogate_column(cm.get("student_column",""), cm["student_table"], stu_identity, config)
+            if hasattr(config.schema, "key_grading") and config.schema.key_grading.mode == "adequacy" and is_extra_surr:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": "",
+                    "student_object": stud_obj,
+                    "status": "SURROGATE_KEY_ACCEPTED",
+                    "severity": "info",
+                    "message": f"Student surrogate column '{cm.get('student_column','')}' is accepted.",
+                    "evidence": ""
+                })
+            else:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": "",
+                    "student_object": stud_obj,
+                    "status": "EXTRA",
+                    "severity": "low",
+                    "message": f"Extra column '{cm.get('student_column','')}' in table '{cm['student_table']}'",
+                    "evidence": ""
+                })
         elif status == "COLUMN_AMBIGUOUS":
             structure_results.append({
                 "component": "column",
@@ -389,15 +495,32 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
                 "evidence": ""
             })
         elif status == "COLUMN_UNMAPPED":
-            structure_results.append({
-                "component": "column",
-                "answer_object": "",
-                "student_object": stud_obj,
-                "status": "MISSING",
-                "severity": "high",
-                "message": f"Unmapped column '{cm.get('student_column','')}' in table '{cm['student_table']}'",
-                "evidence": ""
-            })
+            stu_identity = 0
+            for sc in stu_cols_active:
+                if sc.get("table_name") == cm["student_table"] and sc.get("column_name") == cm.get("student_column"):
+                    stu_identity = sc.get("is_identity", 0)
+                    break
+            is_extra_surr = is_surrogate_column(cm.get("student_column",""), cm["student_table"], stu_identity, config)
+            if hasattr(config.schema, "key_grading") and config.schema.key_grading.mode == "adequacy" and is_extra_surr:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": "",
+                    "student_object": stud_obj,
+                    "status": "SURROGATE_KEY_ACCEPTED",
+                    "severity": "info",
+                    "message": f"Student surrogate column '{cm.get('student_column','')}' is accepted.",
+                    "evidence": ""
+                })
+            else:
+                structure_results.append({
+                    "component": "column",
+                    "answer_object": "",
+                    "student_object": stud_obj,
+                    "status": "MISSING",
+                    "severity": "high",
+                    "message": f"Unmapped column '{cm.get('student_column','')}' in table '{cm['student_table']}'",
+                    "evidence": ""
+                })
         elif status == "COLUMN_INCOMPATIBLE_ROLE":
             structure_results.append({
                 "component": "column",
@@ -428,18 +551,53 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
     # View structure matching
     view_results = match_views_structure(
         ans_snap["views"], stud_snap["views"],
-        ans_snap["view_columns"], stud_snap["view_columns"]
+        ans_snap["view_columns"], stud_snap["view_columns"],
+        config=config
     )
     structure_results.extend(view_results)
 
     # Constraint matching (only for accepted tables)
-    accepted_table_set = set(accepted_pairs.keys())
-    constraint_results = match_constraints(
+    constraint_results, key_adequacy_results, fk_relationship_results, adequacy_counts = match_constraints(
         ans_pks_active, stu_pks_active,
         ans_fks_active, stu_fks_active,
-        accepted_table_set
+        accepted_pairs,
+        config=config,
+        column_mappings=column_mappings,
+        ans_cols=ans_cols_active,
+        stud_cols=stu_cols_active,
+        stud_uniques=stud_snap.get("unique_constraints", [])
     )
     structure_results.extend(constraint_results)
+
+    # Write separate reports if adequacy results are present
+    if key_adequacy_results:
+        key_report_path = output_report_path.parent / "key_adequacy_report.csv"
+        with open(key_report_path, "w", newline="", encoding="utf-8") as f:
+            headers = [
+                "submission_id", "table_name", "student_table", 
+                "answer_pk_columns", "student_pk_columns", 
+                "answer_business_key_columns", "student_business_key_columns", 
+                "key_status", "key_reason", "key_severity"
+            ]
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in key_adequacy_results:
+                writer.writerow(row)
+
+    if fk_relationship_results:
+        fk_report_path = output_report_path.parent / "fk_relationship_report.csv"
+        with open(fk_report_path, "w", newline="", encoding="utf-8") as f:
+            headers = [
+                "submission_id", "fk_name", "answer_child_table", "answer_parent_table",
+                "answer_child_columns", "answer_parent_columns",
+                "student_child_table", "student_parent_table",
+                "student_child_columns", "student_parent_columns",
+                "fk_status", "fk_reason", "fk_severity"
+            ]
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in fk_relationship_results:
+                writer.writerow(row)
 
     # Write structure_report.csv
     with open(output_report_path, "w", newline="", encoding="utf-8") as f:
@@ -453,6 +611,10 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
     for r in structure_results:
         s = r["status"]
         status_counts[s] = status_counts.get(s, 0) + 1
+
+    # Merge adequacy counts into returned status_counts
+    for k, v in adequacy_counts.items():
+        status_counts[k] = v
 
     logger.info(f"Structure comparison completed. Reports saved under: {output_report_path.parent}")
     logger.info(f"Results summary: {status_counts}")

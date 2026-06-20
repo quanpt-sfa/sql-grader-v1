@@ -2,22 +2,51 @@ from typing import List, Dict, Any
 
 def match_views_structure(
     ans_views: List[Dict[str, Any]], stud_views: List[Dict[str, Any]],
-    ans_view_cols: List[Dict[str, Any]], stud_view_cols: List[Dict[str, Any]]
+    ans_view_cols: List[Dict[str, Any]], stud_view_cols: List[Dict[str, Any]],
+    config: Any = None
 ) -> List[Dict[str, Any]]:
     results = []
 
+    # Resolve expected views list based on mode
+    views_mode = getattr(config, "views_mode", "answer_snapshot") if config else "answer_snapshot"
+    
+    if views_mode == "explicit_config" and config and config.views:
+        expected_ans_views = []
+        expected_ans_view_cols = []
+        for vc in config.views:
+            ans_v = next((v for v in ans_views if (v.get("view_name_canonical") or v["view_name"]).lower() == vc.answer_view.lower()), None)
+            ans_phys_name = ans_v["view_name"] if ans_v else vc.answer_view
+            expected_ans_views.append({
+                "view_name": ans_phys_name,
+                "view_name_canonical": vc.answer_view,
+                "execution_status": ans_v["execution_status"] if ans_v else "OK"
+            })
+            for col_idx, col in enumerate(vc.columns):
+                expected_ans_view_cols.append({
+                    "view_name_canonical": vc.answer_view,
+                    "ordinal_position": col_idx + 1,
+                    "column_name": col["canonical"],
+                    "column_name_canonical": col["canonical"],
+                    "data_type": col.get("type", "text")
+                })
+    else:
+        # Default: answer_snapshot mode
+        expected_ans_views = ans_views
+        expected_ans_view_cols = ans_view_cols
+
     # Map views by canonical name
-    ans_view_map = {v["view_name_canonical"]: v for v in ans_views if v["view_name_canonical"]}
-    stud_view_map = {v["view_name_canonical"]: v for v in stud_views if v["view_name_canonical"]}
+    ans_view_map = {v["view_name_canonical"]: v for v in expected_ans_views if v.get("view_name_canonical")}
+    stud_view_map = {v["view_name_canonical"]: v for v in stud_views if v.get("view_name_canonical")}
 
     # Group view columns by view canonical name
     ans_cols_by_view = {}
-    for col in ans_view_cols:
-        v_canon = col["view_name_canonical"]
+    for col in expected_ans_view_cols:
+        v_canon = col.get("view_name_canonical")
         if v_canon:
             ans_cols_by_view.setdefault(v_canon, []).append(col)
 
     stud_cols_by_view = {}
+
     for col in stud_view_cols:
         v_canon = col["view_name_canonical"]
         if v_canon:

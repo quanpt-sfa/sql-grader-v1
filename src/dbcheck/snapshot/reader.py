@@ -38,5 +38,5 @@ def read_snapshot_csv(input_dir: Path, file_key: str) -> List[Dict[str, Any]]:
 
 def read_full_snapshot(input_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     """Read all snapshot files from a directory."""
-    keys = ["tables", "columns", "primary_keys", "foreign_keys", "views", "view_columns"]
+    keys = ["tables", "columns", "primary_keys", "foreign_keys", "views", "view_columns", "unique_constraints"]
     return {key: read_snapshot_csv(input_dir, key) for key in keys}

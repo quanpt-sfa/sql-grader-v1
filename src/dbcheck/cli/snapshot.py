@@ -7,7 +7,8 @@ from dbcheck.sqlserver.connection import SQLServerConnection
 from dbcheck.sqlserver.restore import restore_database, drop_database
 from dbcheck.sqlserver.safety import check_quarantine, extract_submission_id
 from dbcheck.sqlserver.introspection import (
-    get_tables, get_columns, get_primary_keys, get_foreign_keys, get_views, get_view_columns
+    get_tables, get_columns, get_primary_keys, get_foreign_keys, get_views, get_view_columns,
+    get_unique_constraints
 )
 from dbcheck.snapshot.writer import write_full_snapshot
 from dbcheck.snapshot.normalizer import NameNormalizer
@@ -68,7 +69,8 @@ def run_snapshot(args):
             "primary_keys": get_primary_keys(db_conn, answer_db_name, "answer", normalizer),
             "foreign_keys": get_foreign_keys(db_conn, answer_db_name, "answer", normalizer),
             "views": get_views(db_conn, answer_db_name, "answer", normalizer),
-            "view_columns": get_view_columns(db_conn, answer_db_name, "answer", normalizer)
+            "view_columns": get_view_columns(db_conn, answer_db_name, "answer", normalizer),
+            "unique_constraints": get_unique_constraints(db_conn, answer_db_name, "answer", normalizer)
         }
         
         write_full_snapshot(answer_snap_dir, answer_snap)
@@ -145,7 +147,8 @@ def run_snapshot(args):
                 "primary_keys": get_primary_keys(db_conn, temp_stud_db, sub_id, normalizer),
                 "foreign_keys": get_foreign_keys(db_conn, temp_stud_db, sub_id, normalizer),
                 "views": get_views(db_conn, temp_stud_db, sub_id, normalizer),
-                "view_columns": get_view_columns(db_conn, temp_stud_db, sub_id, normalizer)
+                "view_columns": get_view_columns(db_conn, temp_stud_db, sub_id, normalizer),
+                "unique_constraints": get_unique_constraints(db_conn, temp_stud_db, sub_id, normalizer)
             }
             
             write_full_snapshot(student_snap_dir, student_snap)
