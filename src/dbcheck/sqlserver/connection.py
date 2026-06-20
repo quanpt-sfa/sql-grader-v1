@@ -1,3 +1,4 @@
+import os
 import pyodbc
 import pandas as pd
 from typing import List, Dict, Any, Optional
@@ -14,17 +15,51 @@ def get_best_driver() -> str:
 
 class SQLServerConnection:
     def __init__(self, server: str = ".", default_db: str = "master"):
-        self.server = server
+        self.server = os.environ.get("DB_SERVER", server)
         self.default_db = default_db
-        self.driver = get_best_driver()
+        env_driver = os.environ.get("DB_DRIVER")
+        if env_driver:
+            self.driver = env_driver
+        else:
+            self.driver = get_best_driver()
         self.logger = get_logger()
         self.logger.info(f"Using SQL Server ODBC driver: {self.driver}")
 
     def get_conn_str(self, db_name: Optional[str] = None) -> str:
         db = db_name if db_name else self.default_db
-        # ODBC Driver 18 requires TrustServerCertificate=yes and Encrypt=no for local dev servers without certs
-        trust = ";TrustServerCertificate=yes;Encrypt=no" if "ODBC Driver 18" in self.driver else ""
-        return f"DRIVER={{{self.driver}}};SERVER={self.server};DATABASE={db};Trusted_Connection=yes{trust};"
+        
+        server = os.environ.get("DB_SERVER", self.server)
+        driver = os.environ.get("DB_DRIVER", self.driver)
+        auth_mode = os.environ.get("DB_AUTH_MODE", "windows").lower()
+        trust_cert = os.environ.get("DB_TRUST_CERT", "").lower()
+        
+        parts = [
+            f"DRIVER={{{driver}}}",
+            f"SERVER={server}",
+            f"DATABASE={db}"
+        ]
+        
+        if auth_mode == "sql":
+            user = os.environ.get("DB_USER", "")
+            pwd = os.environ.get("DB_PASSWORD", "")
+            parts.append(f"UID={user}")
+            parts.append(f"PWD={pwd}")
+        else:
+            parts.append("Trusted_Connection=yes")
+            
+        # Handle TrustServerCertificate & Encrypt
+        if trust_cert == "yes":
+            parts.append("TrustServerCertificate=yes")
+            parts.append("Encrypt=no")
+        elif trust_cert == "no":
+            parts.append("TrustServerCertificate=no")
+        else:
+            # Fallback to default ODBC Driver 18 logic
+            if "ODBC Driver 18" in driver:
+                parts.append("TrustServerCertificate=yes")
+                parts.append("Encrypt=no")
+                
+        return ";".join(parts) + ";"
 
     def get_connection(self, db_name: Optional[str] = None, autocommit: bool = False) -> pyodbc.Connection:
         conn_str = self.get_conn_str(db_name)
