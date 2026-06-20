@@ -13,16 +13,20 @@ PASS_STATUSES = {
     "COLUMN_MATCHED_EXACT", "COLUMN_MATCHED_ALIAS", "COLUMN_MATCHED_ABBREVIATION",
     "PK_MATCH_EXACT", "PK_MATCH_ALIAS_EQUIVALENT", "PK_SURROGATE_ACCEPTED", "PK_NATURAL_ACCEPTED",
     "FK_MATCH_EXACT", "FK_ALIAS_EQUIVALENT", "FK_SURROGATE_ACCEPTED", "FK_NATURAL_ACCEPTED",
+    "FK_RELATIONSHIP_MATCH", "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT", "FK_RELATIONSHIP_SURROGATE_ACCEPTED", "FK_RELATIONSHIP_NATURAL_ACCEPTED",
     "VIEW_PASS", "PASS"
 }
 
 FAIL_STATUSES = {
     "MISSING", "COLUMN_MISSING_ANSWER", "PK_MISSING", "PK_INVALID", "FK_MISSING", "FK_WRONG_TARGET",
+    "FK_RELATIONSHIP_MISSING", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
+    "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
     "VIEW_NOT_FOUND", "VIEW_EXECUTION_ERROR", "VIEW_VALUE_MISMATCH", "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH"
 }
 
 REVIEW_STATUSES = {
     "PK_REVIEW_REQUIRED", "FK_REVIEW_REQUIRED", "FK_IMPLIED_REVIEW_REQUIRED",
+    "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED", "FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR",
     "MAPPING_AMBIGUOUS", "VIEW_MAPPING_AMBIGUOUS", "VIEW_OUTPUT_SCHEMA_MISMATCH",
     "TYPE_WARNING", "IDENTIFIER_TYPE_WARNING", "COLUMN_UNMAPPED_STUDENT",
     "EXTRA_REVIEW", "DUPLICATE_MAPPING_REVIEW", "SURROGATE_KEY_REVIEW",
@@ -106,18 +110,95 @@ def get_answer_atomic_items(run_dir: Path, config: AssignmentConfig) -> Dict[str
                     
     # 4. Foreign Keys
     fks_file = snap_dir / "foreign_keys.csv"
+    fk_sigs = []
+    use_report = True
+    
+    from dbcheck.snapshot.normalizer import NameNormalizer
+    normalizer = NameNormalizer(config)
+    
     if fks_file.exists():
-        seen_fks = set()
-        with open(fks_file, "r", encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                fk_name = r.get("fk_name")
-                p_table = r.get("parent_table")
-                r_table = r.get("referenced_table")
-                if fk_name and p_table and r_table:
-                    if not config.schema.is_excluded(p_table) and not config.schema.is_excluded(r_table):
-                        if fk_name not in seen_fks:
-                            seen_fks.add(fk_name)
-                            items["foreign_keys"].append(fk_name)
+        try:
+            with open(fks_file, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                headers = reader.fieldnames or []
+                required = {"parent_table_canonical", "parent_column_canonical", 
+                            "referenced_table_canonical", "referenced_column_canonical"}
+                if required.issubset(set(headers)):
+                    rows = list(reader)
+                    if rows:
+                        by_name = {}
+                        for r in rows:
+                            fk_name = r.get("fk_name") or ""
+                            by_name.setdefault(fk_name, []).append(r)
+                            
+                        for fk_name, fk_rows in by_name.items():
+                            first = fk_rows[0]
+                            c_child_t = first.get("parent_table_canonical") or ""
+                            c_parent_t = first.get("referenced_table_canonical") or ""
+                            
+                            if config.schema.is_excluded(c_child_t) or config.schema.is_excluded(c_parent_t):
+                                continue
+                                
+                            col_pairs = []
+                            for r in fk_rows:
+                                pc = r.get("parent_column_canonical") or ""
+                                rc = r.get("referenced_column_canonical") or ""
+                                c_id = r.get("constraint_column_id")
+                                if c_id is not None and c_id != "":
+                                    try: c_id = int(c_id)
+                                    except ValueError: c_id = None
+                                else:
+                                    c_id = None
+                                col_pairs.append((pc, rc, c_id))
+                                
+                            has_ordinals = all(p[2] is not None for p in col_pairs)
+                            if has_ordinals:
+                                sorted_pairs = sorted(col_pairs, key=lambda x: x[2])
+                            else:
+                                sorted_pairs = sorted(col_pairs, key=lambda x: (x[0], x[1]))
+                                
+                            child_cols = [p[0] for p in sorted_pairs]
+                            parent_cols = [p[1] for p in sorted_pairs]
+                            
+                            sig = f"{c_child_t}|{c_parent_t}|{','.join(child_cols)}|{','.join(parent_cols)}"
+                            if sig not in fk_sigs:
+                                fk_sigs.append(sig)
+                        use_report = False
+        except Exception as e:
+            pass
+
+    if use_report:
+        sub_dir = run_dir / "submissions"
+        if sub_dir.exists():
+            for student_folder in sub_dir.iterdir():
+                if student_folder.is_dir():
+                    fk_report = student_folder / "reports" / "fk_relationship_report.csv"
+                    if fk_report.exists():
+                        try:
+                            with open(fk_report, "r", encoding="utf-8") as f:
+                                for r in csv.DictReader(f):
+                                    sig = r.get("answer_relationship_signature")
+                                    if not sig:
+                                        c_child_t = r.get("answer_child_table") or ""
+                                        c_parent_t = r.get("answer_parent_table") or ""
+                                        child_cols = r.get("answer_child_columns") or ""
+                                        parent_cols = r.get("answer_parent_columns") or ""
+                                        if c_child_t and c_parent_t:
+                                            sig = f"{c_child_t}|{c_parent_t}|{child_cols}|{parent_cols}"
+                                    if sig and sig not in fk_sigs:
+                                        parts = sig.split("|")
+                                        if len(parts) >= 2:
+                                            c_child_t = parts[0]
+                                            c_parent_t = parts[1]
+                                            if config.schema.is_excluded(c_child_t) or config.schema.is_excluded(c_parent_t):
+                                                continue
+                                        fk_sigs.append(sig)
+                            if fk_sigs:
+                                break
+                        except Exception as e:
+                            pass
+                            
+    items["foreign_keys"] = fk_sigs
                             
     # 5. Views
     views_file = snap_dir / "views.csv"
@@ -174,9 +255,16 @@ def get_submission_statuses(reports_dir: Path) -> Dict[str, Dict[str, str]]:
     if fk_file.exists():
         with open(fk_file, "r", encoding="utf-8") as f:
             for r in csv.DictReader(f):
-                fk_name = r.get("fk_name")
-                if fk_name:
-                    statuses["foreign_keys"][fk_name] = r.get("fk_status", "FK_MISSING")
+                sig = r.get("answer_relationship_signature")
+                if not sig:
+                    c_child_t = r.get("answer_child_table") or ""
+                    c_parent_t = r.get("answer_parent_table") or ""
+                    child_cols = r.get("answer_child_columns") or ""
+                    parent_cols = r.get("answer_parent_columns") or ""
+                    if c_child_t and c_parent_t:
+                        sig = f"{c_child_t}|{c_parent_t}|{child_cols}|{parent_cols}"
+                if sig:
+                    statuses["foreign_keys"][sig] = r.get("fk_status", "FK_MISSING")
                     
     # 5. Row counts (extracted from table mapping and structure reports)
     struct_file = reports_dir / "structure_report.csv"
@@ -285,6 +373,26 @@ def score_submission(
         total_pts = row["total_points"]
         mode = row["scoring_mode"]
         inc_statuses = set(s.strip() for s in row.get("include_statuses", "").split("|") if s.strip())
+        if comp == "foreign_keys":
+            extra_inc = set()
+            for s in inc_statuses:
+                if s == "FK_MATCH_EXACT":
+                    extra_inc.add("FK_RELATIONSHIP_MATCH")
+                elif s == "FK_RELATIONSHIP_MATCH":
+                    extra_inc.add("FK_MATCH_EXACT")
+                elif s == "FK_ALIAS_EQUIVALENT":
+                    extra_inc.add("FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT")
+                elif s == "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT":
+                    extra_inc.add("FK_ALIAS_EQUIVALENT")
+                elif s == "FK_SURROGATE_ACCEPTED":
+                    extra_inc.add("FK_RELATIONSHIP_SURROGATE_ACCEPTED")
+                elif s == "FK_RELATIONSHIP_SURROGATE_ACCEPTED":
+                    extra_inc.add("FK_SURROGATE_ACCEPTED")
+                elif s == "FK_NATURAL_ACCEPTED":
+                    extra_inc.add("FK_RELATIONSHIP_NATURAL_ACCEPTED")
+                elif s == "FK_RELATIONSHIP_NATURAL_ACCEPTED":
+                    extra_inc.add("FK_NATURAL_ACCEPTED")
+            inc_statuses.update(extra_inc)
         policy = row.get("partial_policy", "").strip()
         
         # 1. Filter expected items matching this rubric row scope

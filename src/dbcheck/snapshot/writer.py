@@ -40,12 +40,17 @@ HEADERS = {
     "foreign_keys": [
         "submission_id",
         "fk_name",
+        "parent_table",
+        "parent_column",
+        "referenced_table",
+        "referenced_column",
         "parent_table_canonical",
         "parent_column_canonical",
         "referenced_table_canonical",
         "referenced_column_canonical",
         "delete_rule",
-        "update_rule"
+        "update_rule",
+        "constraint_column_id"
     ],
     "views": [
         "submission_id",

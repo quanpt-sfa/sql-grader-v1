@@ -11,13 +11,16 @@ REVIEW_STATUSES = {
     "MAPPING_AMBIGUOUS", "VIEW_MAPPING_AMBIGUOUS", "VIEW_OUTPUT_SCHEMA_MISMATCH",
     "TYPE_WARNING", "IDENTIFIER_TYPE_WARNING", "COLUMN_UNMAPPED_STUDENT",
     "EXTRA_REVIEW", "SURROGATE_KEY_REVIEW", "VIEW_TEST_NOT_RUN",
-    "TABLE_REVIEW_REQUIRED", "COLUMN_MATCHED_WEAK_ALIAS", "DUPLICATE_MAPPING_REVIEW"
+    "TABLE_REVIEW_REQUIRED", "COLUMN_MATCHED_WEAK_ALIAS", "DUPLICATE_MAPPING_REVIEW",
+    "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED", "FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR"
 }
 
 HARD_ERROR_STATUSES = {
     "MISSING", "PK_MISSING", "PK_INVALID", "FK_MISSING", "FK_WRONG_TARGET",
     "VIEW_NOT_FOUND", "VIEW_EXECUTION_ERROR", "VIEW_VALUE_MISMATCH",
-    "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH"
+    "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH",
+    "FK_RELATIONSHIP_MISSING", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
+    "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS"
 }
 
 def get_suggested_action(status: str, component: str) -> str:
@@ -33,9 +36,9 @@ def get_suggested_action(status: str, component: str) -> str:
         return "Define a primary key constraint on the student table."
     elif status == "PK_INVALID":
         return "Correct the primary key columns to match the expected design."
-    elif status == "FK_MISSING":
+    elif status in ("FK_MISSING", "FK_RELATIONSHIP_MISSING"):
         return "Define a foreign key constraint to link the tables."
-    elif status == "FK_WRONG_TARGET":
+    elif status in ("FK_WRONG_TARGET", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD", "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS"):
         return "Correct the referenced table or columns of the foreign key constraint."
     elif status == "VIEW_NOT_FOUND":
         return "Create the required view with the correct name and output schema."
@@ -51,10 +54,12 @@ def get_suggested_action(status: str, component: str) -> str:
         return "Verify if the student's surrogate or natural key design is valid."
     elif status == "FK_REVIEW_REQUIRED":
         return "Verify if the student's relationship columns are correct."
-    elif status == "FK_IMPLIED_REVIEW_REQUIRED":
+    elif status in ("FK_IMPLIED_REVIEW_REQUIRED", "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED"):
         return "Verify if this implied relationship is correct and declare it if needed."
-    elif status in ("MAPPING_AMBIGUOUS", "VIEW_MAPPING_AMBIGUOUS"):
+    elif status in ("MAPPING_AMBIGUOUS", "VIEW_MAPPING_AMBIGUOUS", "FK_RELATIONSHIP_AMBIGUOUS"):
         return "Resolve name mapping ambiguity in config aliases."
+    elif status == "FK_RELATIONSHIP_MAPPING_ERROR":
+        return "Verify the tables/columns used in this relationship."
     elif status == "VIEW_OUTPUT_SCHEMA_MISMATCH":
         return "Adjust the output columns or type casting in the view."
     elif status in ("TYPE_WARNING", "IDENTIFIER_TYPE_WARNING"):

@@ -52,6 +52,12 @@ SUMMARY_HEADERS: List[str] = [
     "fk_review_required_count",
     "fk_missing_count",
     "fk_wrong_target_count",
+    "fk_expected_count",
+    "fk_declared_match_count",
+    "fk_implied_review_count",
+    "fk_wrong_parent_count",
+    "fk_wrong_child_columns_count",
+    "fk_relationship_error_count",
     # View metrics
     "view_required_count",
     "view_pass_count",
@@ -117,12 +123,79 @@ def compile_summary(run_dir: Path) -> Path:
         struct_report = sub_dir / "reports" / "structure_report.csv"
         view_report = sub_dir / "reports" / "view_test_report.csv"
 
+        # Check if fk_relationship_report.csv exists
+        fk_report = sub_dir / "reports" / "fk_relationship_report.csv"
+        fk_parsed = False
+        if fk_report.exists():
+            try:
+                with open(fk_report, "r", encoding="utf-8") as ffr:
+                    for fk_row in csv.DictReader(ffr):
+                        row["fk_expected_count"] += 1
+                        fk_status = fk_row.get("fk_status", "").upper()
+                        
+                        if fk_status in [
+                            "FK_RELATIONSHIP_MATCH", "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT",
+                            "FK_RELATIONSHIP_SURROGATE_ACCEPTED", "FK_RELATIONSHIP_NATURAL_ACCEPTED",
+                            "FK_MATCH_EXACT", "FK_ALIAS_EQUIVALENT", "FK_SURROGATE_ACCEPTED", "FK_NATURAL_ACCEPTED"
+                        ]:
+                            row["fk_declared_match_count"] += 1
+                            row["struct_pass_count"] += 1
+                            if fk_status in ("FK_MATCH_EXACT", "FK_RELATIONSHIP_MATCH"):
+                                row["fk_exact_match_count"] += 1
+                            elif fk_status in ("FK_ALIAS_EQUIVALENT", "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT"):
+                                row["fk_alias_equivalent_count"] += 1
+                            elif fk_status in ("FK_SURROGATE_ACCEPTED", "FK_RELATIONSHIP_SURROGATE_ACCEPTED"):
+                                row["fk_surrogate_accepted_count"] += 1
+                            elif fk_status in ("FK_NATURAL_ACCEPTED", "FK_RELATIONSHIP_NATURAL_ACCEPTED"):
+                                row["fk_natural_accepted_count"] += 1
+                            else:
+                                row["fk_relationship_match_count"] += 1
+                                
+                        elif fk_status in ["FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED", "FK_IMPLIED_REVIEW_REQUIRED"]:
+                            row["fk_implied_review_count"] += 1
+                            row["fk_review_required_count"] += 1
+                            row["struct_type_warning_count"] += 1
+                            
+                        elif fk_status in ["FK_RELATIONSHIP_MISSING", "FK_MISSING"]:
+                            row["fk_missing_count"] += 1
+                            row["struct_missing_count"] += 1
+                            
+                        elif fk_status in ["FK_RELATIONSHIP_WRONG_PARENT", "FK_WRONG_TARGET"]:
+                            row["fk_wrong_parent_count"] += 1
+                            row["fk_wrong_target_count"] += 1
+                            row["struct_missing_count"] += 1
+                            
+                        elif fk_status == "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS":
+                            row["fk_wrong_child_columns_count"] += 1
+                            row["struct_missing_count"] += 1
+                            
+                        elif fk_status in ["FK_RELATIONSHIP_WRONG_CHILD", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
+                                           "FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR"]:
+                            row["fk_relationship_error_count"] += 1
+                            if fk_status in ("FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR"):
+                                row["fk_review_required_count"] += 1
+                                row["struct_ambiguous_count"] += 1
+                            else:
+                                row["struct_missing_count"] += 1
+                                
+                        elif fk_status in ["FK_REVIEW_REQUIRED", "FK_AMBIGUOUS", "FK_MAPPING_ERROR"]:
+                            row["fk_review_required_count"] += 1
+                            row["struct_type_warning_count"] += 1
+                            
+                fk_parsed = True
+            except Exception as e:
+                logger.warning(f"Error reading fk_relationship_report for '{sub_id}': {e}")
+
         # Structure stats
         if struct_report.exists():
             try:
                 with open(struct_report, "r", encoding="utf-8") as sf:
                     for s_row in csv.DictReader(sf):
+                        comp = s_row.get("component", "")
                         s_status = s_row["status"].upper()
+                        if fk_parsed and (comp == "fk" or s_status.startswith("FK_")):
+                            continue
+                            
                         if s_status == "PK_MATCH_EXACT":
                             row["pk_exact_match_count"] += 1
                             row["struct_pass_count"] += 1
@@ -200,6 +273,24 @@ def compile_summary(run_dir: Path) -> Path:
                             row["struct_ambiguous_count"] += 1
             except Exception as e:
                 logger.warning(f"Error reading structure report for '{sub_id}': {e}")
+
+        # Fallback for FK counters if fk_relationship_report was missing
+        if not fk_parsed:
+            row["fk_expected_count"] = (
+                row["fk_exact_match_count"] + row["fk_relationship_match_count"] +
+                row["fk_alias_equivalent_count"] + row["fk_surrogate_accepted_count"] +
+                row["fk_natural_accepted_count"] + row["fk_review_required_count"] +
+                row["fk_missing_count"] + row["fk_wrong_target_count"]
+            )
+            row["fk_declared_match_count"] = (
+                row["fk_exact_match_count"] + row["fk_relationship_match_count"] +
+                row["fk_alias_equivalent_count"] + row["fk_surrogate_accepted_count"] +
+                row["fk_natural_accepted_count"]
+            )
+            row["fk_implied_review_count"] = 0
+            row["fk_wrong_parent_count"] = row["fk_wrong_target_count"]
+            row["fk_wrong_child_columns_count"] = 0
+            row["fk_relationship_error_count"] = 0
 
         # View stats
         if view_report.exists():

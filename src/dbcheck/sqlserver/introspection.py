@@ -142,7 +142,8 @@ def get_foreign_keys(db_conn: SQLServerConnection, db_name: str, submission_id: 
         tr.name as referenced_table,
         cr.name as referenced_column,
         fk.delete_referential_action_desc as delete_rule,
-        fk.update_referential_action_desc as update_rule
+        fk.update_referential_action_desc as update_rule,
+        fkc.constraint_column_id as constraint_column_id
     FROM sys.foreign_keys fk
     JOIN sys.tables tp ON fk.parent_object_id = tp.object_id
     JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
@@ -174,12 +175,17 @@ def get_foreign_keys(db_conn: SQLServerConnection, db_name: str, submission_id: 
         fks.append({
             "submission_id": submission_id,
             "fk_name": r["fk_name"],
+            "parent_table": p_table,
+            "parent_column": p_column,
+            "referenced_table": r_table,
+            "referenced_column": r_column,
             "parent_table_canonical": p_table_canon,
             "parent_column_canonical": p_column_canon,
             "referenced_table_canonical": r_table_canon,
             "referenced_column_canonical": r_column_canon,
             "delete_rule": r["delete_rule"],
-            "update_rule": r["update_rule"]
+            "update_rule": r["update_rule"],
+            "constraint_column_id": int(r["constraint_column_id"]) if r.get("constraint_column_id") is not None else None
         })
     return fks
 

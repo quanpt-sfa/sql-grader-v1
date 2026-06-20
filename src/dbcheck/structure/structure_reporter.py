@@ -677,11 +677,30 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
         fk_report_path = output_report_path.parent / "fk_relationship_report.csv"
         with open(fk_report_path, "w", newline="", encoding="utf-8") as f:
             headers = [
-                "submission_id", "fk_name", "answer_child_table", "answer_parent_table",
-                "answer_child_columns", "answer_parent_columns",
-                "student_child_table", "student_parent_table",
-                "student_child_columns", "student_parent_columns",
-                "fk_status", "fk_reason", "fk_severity"
+                "submission_id",
+                "answer_fk_name",
+                "student_fk_name",
+                "answer_child_table",
+                "answer_parent_table",
+                "answer_child_columns",
+                "answer_parent_columns",
+                "student_child_table",
+                "student_parent_table",
+                "student_child_columns",
+                "student_parent_columns",
+                "mapped_student_child_table",
+                "mapped_student_parent_table",
+                "mapped_student_child_columns",
+                "mapped_student_parent_columns",
+                "answer_relationship_signature",
+                "student_relationship_signature",
+                "fk_status",
+                "fk_reason",
+                "declared_fk_exists",
+                "implied_relationship_exists",
+                "review_required",
+                "match_method",
+                "fk_severity"
             ]
             writer = csv.DictWriter(f, fieldnames=headers)
             writer.writeheader()

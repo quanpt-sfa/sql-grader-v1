@@ -290,6 +290,91 @@ def _match_constraints_exact(
     return results
 
 
+def build_relationship_signatures(fk_rows, normalizer):
+    """
+    Groups fk_rows by fk_name and constructs canonical relationship signatures.
+    Returns a list of dicts, each representing a constraint.
+    """
+    by_name = {}
+    for r in fk_rows:
+        fk_name = r.get("fk_name") or ""
+        by_name.setdefault(fk_name, []).append(r)
+        
+    constraints = []
+    for fk_name, rows in by_name.items():
+        first = rows[0]
+        phys_child_t = first.get("parent_table") or first.get("parent_table_canonical") or ""
+        phys_parent_t = first.get("referenced_table") or first.get("referenced_table_canonical") or ""
+        
+        try:
+            canon_child_t = normalizer.get_canonical_table(phys_child_t)
+        except ValueError:
+            canon_child_t = "AMBIGUOUS_TABLE"
+            
+        try:
+            canon_parent_t = normalizer.get_canonical_table(phys_parent_t)
+        except ValueError:
+            canon_parent_t = "AMBIGUOUS_TABLE"
+            
+        col_pairs = []
+        for r in rows:
+            pc_phys = r.get("parent_column") or r.get("parent_column_canonical") or ""
+            rc_phys = r.get("referenced_column") or r.get("referenced_column_canonical") or ""
+            
+            try:
+                pc_canon = normalizer.get_canonical_column(pc_phys, canon_child_t)
+            except ValueError:
+                pc_canon = "AMBIGUOUS_COLUMN"
+                
+            try:
+                rc_canon = normalizer.get_canonical_column(rc_phys, canon_parent_t)
+            except ValueError:
+                rc_canon = "AMBIGUOUS_COLUMN"
+                
+            c_col_id = r.get("constraint_column_id")
+            if c_col_id is not None and c_col_id != "":
+                try:
+                    c_col_id = int(c_col_id)
+                except ValueError:
+                    c_col_id = None
+            else:
+                c_col_id = None
+            col_pairs.append((pc_canon, rc_canon, pc_phys, rc_phys, c_col_id))
+            
+        # Sort col_pairs
+        has_ordinals = all(p[4] is not None for p in col_pairs)
+        if has_ordinals:
+            sorted_pairs = sorted(col_pairs, key=lambda x: x[4])
+            order_unknown = False
+        else:
+            sorted_pairs = sorted(col_pairs, key=lambda x: (x[0], x[1]))
+            order_unknown = True
+            
+        child_canon_cols = [p[0] for p in sorted_pairs]
+        parent_canon_cols = [p[1] for p in sorted_pairs]
+        child_phys_cols = [p[2] for p in sorted_pairs]
+        parent_phys_cols = [p[3] for p in sorted_pairs]
+        
+        sig = f"{canon_child_t}|{canon_parent_t}|{','.join(child_canon_cols)}|{','.join(parent_canon_cols)}"
+        
+        constraints.append({
+            "fk_name": fk_name,
+            "child_table": phys_child_t,
+            "parent_table": phys_parent_t,
+            "mapped_child_table": canon_child_t,
+            "mapped_parent_table": canon_parent_t,
+            "child_columns": ",".join(child_phys_cols),
+            "parent_columns": ",".join(parent_phys_cols),
+            "mapped_child_columns": ",".join(child_canon_cols),
+            "mapped_parent_columns": ",".join(parent_canon_cols),
+            "signature": sig,
+            "order_unknown": order_unknown,
+            "rows": rows
+        })
+        
+    return constraints
+
+
 def _match_constraints_adequacy(
     ans_pks: List[Dict[str, Any]], stud_pks: List[Dict[str, Any]],
     ans_fks: List[Dict[str, Any]], stud_fks: List[Dict[str, Any]],
@@ -353,171 +438,242 @@ def _match_constraints_adequacy(
     # 1. GRADE FOREIGN KEYS (used for PK detail validation)
     fk_grading_status = {}  # maps (ans_child_t, ans_parent_t) -> status
     
+    from dbcheck.snapshot.normalizer import NameNormalizer
+    normalizer = NameNormalizer(config)
+    
     # Track expected relationships
     expected_relations = set()
     for fk in ans_fks:
         expected_relations.add((fk["parent_table_canonical"], fk["referenced_table_canonical"]))
 
-    for fk in ans_fks:
-        ans_child_t = fk["parent_table_canonical"]
-        ans_parent_t = fk["referenced_table_canonical"]
-        ans_child_col = fk["parent_column_canonical"]
-        ans_parent_col = fk["referenced_column_canonical"]
+    # Group and build signatures for expected (answer) and student foreign keys
+    ans_c_list = build_relationship_signatures(ans_fks, normalizer)
+    stud_c_list = build_relationship_signatures(stud_fks, normalizer)
+    
+    used_stud_fks = set()  # set of student fk_names that have been matched/used
+    
+    for ans_c in ans_c_list:
+        ans_child_t = ans_c["mapped_child_table"]
+        ans_parent_t = ans_c["mapped_parent_table"]
         
-        stud_child_t = accepted_table_pairs.get(ans_child_t)
-        stud_parent_t = accepted_table_pairs.get(ans_parent_t)
+        # Find the best student constraint matching this expected relationship
+        stud_c = None
         
+        # Try to match child and parent table canonically first
+        stud_candidates = [
+            sc for sc in stud_c_list
+            if sc["mapped_child_table"] == ans_child_t and sc["mapped_parent_table"] == ans_parent_t
+        ]
+        
+        # Select first unused candidate
+        for sc in stud_candidates:
+            if sc["fk_name"] not in used_stud_fks:
+                stud_c = sc
+                used_stud_fks.add(sc["fk_name"])
+                break
+                
+        # If not found, check if header currency relationship is accepted per config
+        if not stud_c and ans_parent_t == "LoaiTien":
+            currency_candidates = [
+                sc for sc in stud_c_list
+                if sc["mapped_child_table"] == ans_child_t and sc["fk_name"] not in used_stud_fks
+            ]
+            for sc in currency_candidates:
+                if is_header_currency_accepted(ans_child_t, sc["mapped_parent_table"], config):
+                    stud_c = sc
+                    used_stud_fks.add(sc["fk_name"])
+                    break
+                    
         fk_row = {
-            "submission_id": fk.get("submission_id", "student"),
-            "fk_name": "",
-            "answer_child_table": ans_child_t,
-            "answer_parent_table": ans_parent_t,
-            "answer_child_columns": ans_child_col,
-            "answer_parent_columns": ans_parent_col,
-            "student_child_table": stud_child_t or "",
-            "student_parent_table": stud_parent_t or "",
-            "student_child_columns": "",
-            "student_parent_columns": "",
-            "fk_status": "FK_MISSING",
+            "submission_id": ans_c.get("submission_id", "student"),
+            "answer_fk_name": ans_c["fk_name"],
+            "student_fk_name": stud_c["fk_name"] if stud_c else "",
+            "answer_child_table": ans_c["child_table"],
+            "answer_parent_table": ans_c["parent_table"],
+            "answer_child_columns": ans_c["child_columns"],
+            "answer_parent_columns": ans_c["parent_columns"],
+            "student_child_table": stud_c["child_table"] if stud_c else "",
+            "student_parent_table": stud_c["parent_table"] if stud_c else "",
+            "student_child_columns": stud_c["child_columns"] if stud_c else "",
+            "student_parent_columns": stud_c["parent_columns"] if stud_c else "",
+            "mapped_student_child_table": stud_c["mapped_child_table"] if stud_c else "",
+            "mapped_student_parent_table": stud_c["mapped_parent_table"] if stud_c else "",
+            "mapped_student_child_columns": stud_c["mapped_child_columns"] if stud_c else "",
+            "mapped_student_parent_columns": stud_c["mapped_parent_columns"] if stud_c else "",
+            "answer_relationship_signature": ans_c["signature"],
+            "student_relationship_signature": stud_c["signature"] if stud_c else "",
+            "fk_status": "FK_RELATIONSHIP_MISSING",
             "fk_reason": "",
+            "declared_fk_exists": "True" if stud_c else "False",
+            "implied_relationship_exists": "False",
+            "review_required": "False",
+            "match_method": "missing",
             "fk_severity": "high"
         }
-
-        if not stud_child_t or not stud_parent_t:
-            fk_row["fk_status"] = "FK_MISSING"
+        
+        # Add fk_name for diagnostic / backward compatibility
+        fk_row["fk_name"] = fk_row["student_fk_name"] or fk_row["answer_fk_name"]
+        
+        stud_child_t_phys = accepted_table_pairs.get(ans_child_t)
+        stud_parent_t_phys = accepted_table_pairs.get(ans_parent_t)
+        
+        if not stud_child_t_phys or not stud_parent_t_phys:
+            fk_row["fk_status"] = "FK_RELATIONSHIP_MISSING"
             fk_row["fk_reason"] = f"Tables not mapped: child={ans_child_t}, parent={ans_parent_t}"
+            fk_row["fk_severity"] = "high"
+            fk_row["match_method"] = "missing"
             fk_relationship_results.append(fk_row)
-            fk_grading_status[(ans_child_t, ans_parent_t)] = "FK_MISSING"
+            fk_grading_status[(ans_child_t, ans_parent_t)] = "FK_RELATIONSHIP_MISSING"
             counts["fk_missing_count"] += 1
             continue
-
-        # Look for matching student foreign keys
-        matching_stud_fks = [
-            sf for sf in stud_fks 
-            if sf.get("parent_table_canonical") == ans_child_t and sf.get("referenced_table_canonical") == ans_parent_t
-        ]
-
-        if not matching_stud_fks:
-            # Check for implied FK
-            if suggests_relationship(stud_child_t, ans_parent_t, ans_parent_col, stud_cols, config):
-                fk_row["fk_status"] = "FK_IMPLIED_REVIEW_REQUIRED"
-                fk_row["fk_reason"] = f"Declared FK is missing, but child table '{stud_child_t}' has matching columns."
-                fk_row["fk_severity"] = "warning"
+            
+        if stud_c:
+            if "AMBIGUOUS" in stud_c["signature"]:
+                fk_row["fk_status"] = "FK_RELATIONSHIP_AMBIGUOUS"
+                fk_row["fk_reason"] = "Ambiguous table or column mapping resolved for relationship."
+                fk_row["fk_severity"] = "high"
+                fk_row["review_required"] = "True"
+                fk_row["match_method"] = "ambiguous"
                 counts["fk_review_required_count"] += 1
-            else:
-                fk_row["fk_status"] = "FK_MISSING"
-                fk_row["fk_reason"] = f"No declared FK or relationship columns between '{stud_child_t}' and '{stud_parent_t}'."
-                counts["fk_missing_count"] += 1
-            fk_relationship_results.append(fk_row)
-            fk_grading_status[(ans_child_t, ans_parent_t)] = fk_row["fk_status"]
-            continue
-
-        # Grade first matching FK
-        sfk = matching_stud_fks[0]
-        fk_row["fk_name"] = sfk.get("fk_name", "")
-        
-        s_child_col = sfk.get("parent_column_canonical", "")
-        s_parent_col = sfk.get("referenced_column_canonical", "")
-        
-        fk_row["student_child_columns"] = s_child_col
-        fk_row["student_parent_columns"] = s_parent_col
-
-        ans_child_raw = get_raw_col_name(ans_child_t, ans_child_col, ans_cols, False)
-        ans_parent_raw = get_raw_col_name(ans_parent_t, ans_parent_col, ans_cols, False)
-        stud_child_raw = get_raw_col_name(stud_child_t, s_child_col, stud_cols, True)
-        stud_parent_raw = get_raw_col_name(stud_parent_t, s_parent_col, stud_cols, True)
-
-        # Check exact and alias equivalent
-        if s_child_col == ans_child_col and s_parent_col == ans_parent_col:
-            if stud_child_raw.lower() == ans_child_raw.lower() and stud_parent_raw.lower() == ans_parent_raw.lower():
-                fk_row["fk_status"] = "FK_MATCH_EXACT"
-                fk_row["fk_reason"] = "Physical columns and relationship map exactly."
+            elif "UNMAPPED" in stud_c["signature"]:
+                fk_row["fk_status"] = "FK_RELATIONSHIP_MAPPING_ERROR"
+                fk_row["fk_reason"] = "Unmapped table or column in relationship mapping."
+                fk_row["fk_severity"] = "high"
+                fk_row["review_required"] = "True"
+                fk_row["match_method"] = "mapping_error"
+                counts["fk_review_required_count"] += 1
+            elif is_header_currency_accepted(ans_child_t, stud_c["mapped_parent_table"], config):
+                fk_row["fk_status"] = "FK_RELATIONSHIP_MATCH"
+                fk_row["fk_reason"] = "Header currency relationship accepted per configuration."
                 fk_row["fk_severity"] = "info"
+                fk_row["match_method"] = "exact"
                 counts["fk_exact_match_count"] += 1
             else:
-                fk_row["fk_status"] = "FK_ALIAS_EQUIVALENT"
-                fk_row["fk_reason"] = "Relationship matches via column aliases."
-                fk_row["fk_severity"] = "info"
-                counts["fk_alias_equivalent_count"] += 1
+                if stud_c["mapped_child_columns"] == ans_c["mapped_child_columns"] and stud_c["mapped_parent_columns"] == ans_c["mapped_parent_columns"]:
+                    if stud_c["child_columns"].lower() == ans_c["child_columns"].lower() and stud_c["parent_columns"].lower() == ans_c["parent_columns"].lower():
+                        fk_row["fk_status"] = "FK_RELATIONSHIP_MATCH"
+                        fk_row["fk_reason"] = "Physical columns and relationship map exactly."
+                        fk_row["fk_severity"] = "info"
+                        fk_row["match_method"] = "exact"
+                        counts["fk_exact_match_count"] += 1
+                    else:
+                        fk_row["fk_status"] = "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT"
+                        fk_row["fk_reason"] = "Relationship matches via column aliases."
+                        fk_row["fk_severity"] = "info"
+                        fk_row["match_method"] = "alias"
+                        counts["fk_alias_equivalent_count"] += 1
+                else:
+                    is_parent_identity = get_is_identity(stud_c["parent_table"], stud_c["parent_columns"], stud_cols)
+                    is_parent_surrogate = is_surrogate_column(stud_c["parent_columns"], stud_c["parent_table"], is_parent_identity, config)
+                    
+                    ans_parent_identity = 0
+                    for ac in ans_cols:
+                        if ac.get("table_name_canonical") == ans_parent_t and ac.get("column_name_canonical") == ans_c["mapped_parent_columns"]:
+                            ans_parent_identity = ac.get("is_identity", 0)
+                            break
+                    ans_parent_surrogate = is_surrogate_column(ans_c["parent_columns"], ans_parent_t, ans_parent_identity, config)
+                    
+                    if is_parent_surrogate and not ans_parent_surrogate:
+                        fk_row["fk_status"] = "FK_RELATIONSHIP_SURROGATE_ACCEPTED"
+                        fk_row["fk_reason"] = "Student references parent surrogate key instead of business key."
+                        fk_row["fk_severity"] = "info"
+                        fk_row["match_method"] = "surrogate"
+                        counts["fk_surrogate_accepted_count"] += 1
+                    elif not is_parent_surrogate and ans_parent_surrogate:
+                        fk_row["fk_status"] = "FK_RELATIONSHIP_NATURAL_ACCEPTED"
+                        fk_row["fk_reason"] = "Student references parent natural key instead of surrogate key."
+                        fk_row["fk_severity"] = "info"
+                        fk_row["match_method"] = "natural"
+                        counts["fk_natural_accepted_count"] += 1
+                    else:
+                        if stud_c["mapped_parent_columns"] == ans_c["mapped_parent_columns"]:
+                            fk_row["fk_status"] = "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS"
+                            fk_row["fk_reason"] = f"Child columns do not match expected: expected '{ans_c['mapped_child_columns']}', got '{stud_c['mapped_child_columns']}'."
+                            fk_row["fk_severity"] = "high"
+                            fk_row["match_method"] = "wrong_child_columns"
+                            counts["fk_wrong_target_count"] += 1
+                        elif stud_c["mapped_child_columns"] == ans_c["mapped_child_columns"]:
+                            fk_row["fk_status"] = "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS"
+                            fk_row["fk_reason"] = f"Parent columns do not match expected: expected '{ans_c['mapped_parent_columns']}', got '{stud_c['mapped_parent_columns']}'."
+                            fk_row["fk_severity"] = "high"
+                            fk_row["match_method"] = "wrong_parent_columns"
+                            counts["fk_wrong_target_count"] += 1
+                        else:
+                            fk_row["fk_status"] = "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS"
+                            fk_row["fk_reason"] = f"Relationship columns mismatch: expected child '{ans_c['mapped_child_columns']}' -> parent '{ans_c['mapped_parent_columns']}', got child '{stud_c['mapped_child_columns']}' -> parent '{stud_c['mapped_parent_columns']}'."
+                            fk_row["fk_severity"] = "high"
+                            fk_row["match_method"] = "wrong_child_columns"
+                            counts["fk_wrong_target_count"] += 1
         else:
-            # Check surrogate or natural accepted
-            is_parent_identity = get_is_identity(stud_parent_t, stud_parent_raw, stud_cols)
-            is_parent_surrogate = is_surrogate_column(stud_parent_raw, stud_parent_t, is_parent_identity, config)
-            
-            ans_parent_identity = 0
-            for ac in ans_cols:
-                if ac.get("table_name_canonical") == ans_parent_t and ac.get("column_name_canonical") == ans_parent_col:
-                    ans_parent_identity = ac.get("is_identity", 0)
+            wrong_parent_c = None
+            for sc in stud_c_list:
+                if sc["mapped_child_table"] == ans_child_t and sc["fk_name"] not in used_stud_fks:
+                    wrong_parent_c = sc
+                    used_stud_fks.add(sc["fk_name"])
                     break
-            ans_parent_surrogate = is_surrogate_column(ans_parent_raw, ans_parent_t, ans_parent_identity, config)
-
-            if is_parent_surrogate and not ans_parent_surrogate:
-                fk_row["fk_status"] = "FK_SURROGATE_ACCEPTED"
-                fk_row["fk_reason"] = "Student references parent surrogate key instead of business key."
-                fk_row["fk_severity"] = "info"
-                counts["fk_surrogate_accepted_count"] += 1
-            elif not is_parent_surrogate and ans_parent_surrogate:
-                fk_row["fk_status"] = "FK_NATURAL_ACCEPTED"
-                fk_row["fk_reason"] = "Student references parent natural key instead of surrogate key."
-                fk_row["fk_severity"] = "info"
-                counts["fk_natural_accepted_count"] += 1
+                    
+            if wrong_parent_c:
+                fk_row["student_fk_name"] = wrong_parent_c["fk_name"]
+                fk_row["fk_name"] = wrong_parent_c["fk_name"]
+                fk_row["student_child_table"] = wrong_parent_c["child_table"]
+                fk_row["student_parent_table"] = wrong_parent_c["parent_table"]
+                fk_row["student_child_columns"] = wrong_parent_c["child_columns"]
+                fk_row["student_parent_columns"] = wrong_parent_c["parent_columns"]
+                fk_row["mapped_student_child_table"] = wrong_parent_c["mapped_child_table"]
+                fk_row["mapped_student_parent_table"] = wrong_parent_c["mapped_parent_table"]
+                fk_row["mapped_student_child_columns"] = wrong_parent_c["mapped_child_columns"]
+                fk_row["mapped_student_parent_columns"] = wrong_parent_c["mapped_parent_columns"]
+                fk_row["student_relationship_signature"] = wrong_parent_c["signature"]
+                fk_row["declared_fk_exists"] = "True"
+                fk_row["fk_status"] = "FK_RELATIONSHIP_WRONG_PARENT"
+                fk_row["fk_reason"] = f"Child table referenced wrong parent: expected '{ans_parent_t}', got '{wrong_parent_c['mapped_parent_table']}'."
+                fk_row["fk_severity"] = "high"
+                fk_row["match_method"] = "wrong_parent"
+                counts["fk_wrong_target_count"] += 1
             else:
-                fk_row["fk_status"] = "FK_RELATIONSHIP_MATCH"
-                fk_row["fk_reason"] = "Correct parent-child relationship declared."
-                fk_row["fk_severity"] = "info"
-                counts["fk_relationship_match_count"] += 1
-
+                wrong_child_c = None
+                for sc in stud_c_list:
+                    if sc["mapped_parent_table"] == ans_parent_t and sc["fk_name"] not in used_stud_fks:
+                        wrong_child_c = sc
+                        used_stud_fks.add(sc["fk_name"])
+                        break
+                        
+                if wrong_child_c:
+                    fk_row["student_fk_name"] = wrong_child_c["fk_name"]
+                    fk_row["fk_name"] = wrong_child_c["fk_name"]
+                    fk_row["student_child_table"] = wrong_child_c["child_table"]
+                    fk_row["student_parent_table"] = wrong_child_c["parent_table"]
+                    fk_row["student_child_columns"] = wrong_child_c["child_columns"]
+                    fk_row["student_parent_columns"] = wrong_child_c["parent_columns"]
+                    fk_row["mapped_student_child_table"] = wrong_child_c["mapped_child_table"]
+                    fk_row["mapped_student_parent_table"] = wrong_child_c["mapped_parent_table"]
+                    fk_row["mapped_student_child_columns"] = wrong_child_c["mapped_child_columns"]
+                    fk_row["mapped_student_parent_columns"] = wrong_child_c["mapped_parent_columns"]
+                    fk_row["student_relationship_signature"] = wrong_child_c["signature"]
+                    fk_row["declared_fk_exists"] = "True"
+                    fk_row["fk_status"] = "FK_RELATIONSHIP_WRONG_CHILD"
+                    fk_row["fk_reason"] = f"Parent table referenced by wrong child: expected '{ans_child_t}', got '{wrong_child_c['mapped_child_table']}'."
+                    fk_row["fk_severity"] = "high"
+                    fk_row["match_method"] = "wrong_child"
+                    counts["fk_wrong_target_count"] += 1
+                else:
+                    if suggests_relationship(stud_child_t_phys, ans_parent_t, ans_c["mapped_parent_columns"], stud_cols, config):
+                        fk_row["fk_status"] = "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED"
+                        fk_row["fk_reason"] = f"Declared FK is missing, but child table '{stud_child_t_phys}' has matching columns."
+                        fk_row["fk_severity"] = "warning"
+                        fk_row["implied_relationship_exists"] = "True"
+                        fk_row["review_required"] = "True"
+                        fk_row["match_method"] = "implied"
+                        counts["fk_review_required_count"] += 1
+                    else:
+                        fk_row["fk_status"] = "FK_RELATIONSHIP_MISSING"
+                        fk_row["fk_reason"] = f"No declared FK or relationship columns between '{stud_child_t_phys}' and parent table."
+                        fk_row["fk_severity"] = "high"
+                        fk_row["match_method"] = "missing"
+                        counts["fk_missing_count"] += 1
+                        
         fk_relationship_results.append(fk_row)
         fk_grading_status[(ans_child_t, ans_parent_t)] = fk_row["fk_status"]
-
-    # Check for wrong target FKs in student database
-    for sfk in stud_fks:
-        s_child_t = sfk.get("parent_table_canonical")
-        s_parent_t = sfk.get("referenced_table_canonical")
-        if not s_child_t or not s_parent_t or s_child_t == "AMBIGUOUS_TABLE" or s_parent_t == "AMBIGUOUS_TABLE":
-            continue
-        # If there's an expected relationship for child table, but not to this parent table
-        child_expected_parents = {p for c, p in expected_relations if c == s_child_t}
-        if child_expected_parents and s_parent_t not in child_expected_parents:
-            # Check if config accepts this currency at header
-            if is_header_currency_accepted(s_child_t, s_parent_t, config):
-                fk_row = {
-                    "submission_id": sfk.get("submission_id", "student"),
-                    "fk_name": sfk.get("fk_name", ""),
-                    "answer_child_table": s_child_t,
-                    "answer_parent_table": s_parent_t,
-                    "answer_child_columns": "MaLoaiTien",
-                    "answer_parent_columns": "MaLoaiTien",
-                    "student_child_table": accepted_table_pairs.get(s_child_t) or s_child_t,
-                    "student_parent_table": accepted_table_pairs.get(s_parent_t) or s_parent_t,
-                    "student_child_columns": sfk.get("parent_column_canonical", ""),
-                    "student_parent_columns": sfk.get("referenced_column_canonical", ""),
-                    "fk_status": "FK_RELATIONSHIP_MATCH",
-                    "fk_reason": "Header currency relationship accepted per configuration.",
-                    "fk_severity": "info"
-                }
-                fk_relationship_results.append(fk_row)
-                counts["fk_relationship_match_count"] += 1
-                continue
-
-            # Report Wrong Target
-            fk_row = {
-                "submission_id": sfk.get("submission_id", "student"),
-                "fk_name": sfk.get("fk_name", ""),
-                "answer_child_table": s_child_t,
-                "answer_parent_table": list(child_expected_parents)[0] if child_expected_parents else "",
-                "answer_child_columns": "",
-                "answer_parent_columns": "",
-                "student_child_table": accepted_table_pairs.get(s_child_t) or s_child_t,
-                "student_parent_table": accepted_table_pairs.get(s_parent_t) or s_parent_t,
-                "student_child_columns": sfk.get("parent_column_canonical", ""),
-                "student_parent_columns": sfk.get("referenced_column_canonical", ""),
-                "fk_status": "FK_WRONG_TARGET",
-                "fk_reason": f"Child table referenced wrong parent: expected {child_expected_parents}, got {s_parent_t}",
-                "fk_severity": "high"
-            }
-            fk_relationship_results.append(fk_row)
-            counts["fk_wrong_target_count"] += 1
 
     # 2. GRADE PRIMARY KEYS
     for canon_t, ans_pk_records in ans_table_pks.items():
@@ -642,7 +798,10 @@ def _match_constraints_adequacy(
                         for r_child, r_parent in expected_relations:
                             if r_child == canon_t:
                                 r_status = fk_grading_status.get((r_child, r_parent), "FK_MISSING")
-                                if r_status not in ["FK_MATCH_EXACT", "FK_ALIAS_EQUIVALENT", "FK_SURROGATE_ACCEPTED", "FK_NATURAL_ACCEPTED", "FK_RELATIONSHIP_MATCH"]:
+                                if r_status not in [
+                                    "FK_MATCH_EXACT", "FK_ALIAS_EQUIVALENT", "FK_SURROGATE_ACCEPTED", "FK_NATURAL_ACCEPTED", "FK_RELATIONSHIP_MATCH",
+                                    "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT", "FK_RELATIONSHIP_SURROGATE_ACCEPTED", "FK_RELATIONSHIP_NATURAL_ACCEPTED"
+                                ]:
                                     relations_adequate = False
                                     failed_relation = r_parent
                                     break
@@ -692,9 +851,14 @@ def _match_constraints_adequacy(
 
     for fk in fk_relationship_results:
         status_to_report = "PASS"
-        if fk["fk_status"] == "FK_MISSING":
+        if fk["fk_status"] in ["FK_MISSING", "FK_RELATIONSHIP_MISSING"]:
             status_to_report = "MISSING"
-        elif fk["fk_status"] in ["FK_IMPLIED_REVIEW_REQUIRED", "FK_WRONG_TARGET"]:
+        elif fk["fk_status"] in [
+            "FK_IMPLIED_REVIEW_REQUIRED", "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED",
+            "FK_WRONG_TARGET", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
+            "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
+            "FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR", "FK_REVIEW_REQUIRED"
+        ]:
             status_to_report = "RULE_MISMATCH"
         else:
             status_to_report = "PASS"

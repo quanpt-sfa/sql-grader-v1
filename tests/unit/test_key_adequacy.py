@@ -193,7 +193,7 @@ def test_fk_adequacy_exact_alias_and_surrogate(base_config_data):
         [], [], ans_fks, stud_fks_exact, {"ChiTietMuaHang": "ChiTietMuaHang", "MuaHang": "MuaHang"},
         config, [], ans_cols, stud_cols, []
     )
-    assert fk_report1[0]["fk_status"] == "FK_MATCH_EXACT"
+    assert fk_report1[0]["fk_status"] == "FK_RELATIONSHIP_MATCH"
     assert counts1["fk_exact_match_count"] == 1
 
     # 2. Surrogate match
@@ -211,7 +211,7 @@ def test_fk_adequacy_exact_alias_and_surrogate(base_config_data):
         [], [], ans_fks, stud_fks_surrogate, {"ChiTietMuaHang": "ChiTietMuaHang", "MuaHang": "MuaHang"},
         config, [], ans_cols, stud_cols_surr, []
     )
-    assert fk_report2[0]["fk_status"] == "FK_SURROGATE_ACCEPTED"
+    assert fk_report2[0]["fk_status"] == "FK_RELATIONSHIP_SURROGATE_ACCEPTED"
     assert counts2["fk_surrogate_accepted_count"] == 1
 
 def test_fk_implied_review_required(base_config_data):
@@ -237,7 +237,7 @@ def test_fk_implied_review_required(base_config_data):
         [], [], ans_fks, [], {"ChiTietMuaHang": "ChiTietMuaHang", "MuaHang": "MuaHang"},
         config, [], ans_cols, stud_cols, []
     )
-    assert fk_report[0]["fk_status"] == "FK_IMPLIED_REVIEW_REQUIRED"
+    assert fk_report[0]["fk_status"] == "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED"
     assert counts["fk_review_required_count"] == 1
 
 

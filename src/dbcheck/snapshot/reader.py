@@ -6,7 +6,7 @@ from dbcheck.utils.logging import get_logger
 INT_FIELDS = {
     "object_id", "column_count", "row_count",
     "ordinal_position", "max_length", "precision", "scale", "is_nullable", "is_identity",
-    "key_ordinal"
+    "key_ordinal", "constraint_column_id"
 }
 
 def read_snapshot_csv(input_dir: Path, file_key: str) -> List[Dict[str, Any]]:
