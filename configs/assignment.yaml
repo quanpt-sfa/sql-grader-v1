@@ -1,0 +1,62 @@
+assignment:
+  name: "Purchase Order Assignment Check"
+  protected_answer_db: "00000001"
+
+schema:
+  matching_threshold: 0.8
+  aliases:
+    tables:
+      NhanVien: ["Employee", "NhanVien"]
+      KhachHang: ["Customer", "KH", "NhaCungCap", "NCC", "04. NCC", "04.NCC"]
+      Hang: ["Product", "HangHoa", "HTK", "HangTonKho", "01. HTK", "01.HangTonKho"]
+      Tien: ["Currency", "LoaiTien", "Tien", "02.Tien", "02.TIEN"]
+      BanHang: ["Sales", "MuaHang", "Muahangg", "05.MUAHANG", "05.Muahangg"]
+      ChiTietBanHang: ["SalesDetail", "ChiTietMuaHang", "CT_MuaHang", "06. CT_MUAHANG", "06.CT_MuaHang"]
+      ThuTien: ["Receipt", "TraTien", "ChiTien", "CHITIEN", "07. CHITIEN", "07.ChiTien"]
+      ChiTietThuTien: ["ReceiptDetail", "ChiTietTraTien", "CT_ChiTien", "CT_CHITIEN", "08.CT_CHITIEN", "08.CT_ChiTien"]
+    columns:
+      MaKH: ["CustomerID", "MaKhachHang", "MaNhaCungCap"]
+      TenKH: ["CustomerName", "TenKhachHang", "TenNhaCungCap"]
+      MaNV: ["EmployeeID", "MaNhanVien"]
+      TenNV: ["EmployeeName", "TenNhanVien"]
+      MaHang: ["ProductID", "MaHangHoa"]
+      TenHang: ["ProductName", "TenHangHoa"]
+      MaHD: ["InvoiceID", "MaHD", "PhieuMuaHang"]
+      NgayHD: ["DateCreated", "NgayLap", "NgayMuaHang"]
+      MaTien: ["CurrencyID", "MaLoaiTien"]
+      TenTien: ["CurrencyName", "TenLoaiTien"]
+      SoLuong: ["Quantity", "SoLuong"]
+      DonGia: ["UnitPrice", "DonGia"]
+
+views:
+  - answer_view: "Cau1"
+    expected_output:
+      columns:
+        - canonical: "MaKH"
+          type: "text"
+          aliases: ["MaNhaCungCap"]
+        - canonical: "TenKH"
+          type: "text"
+          aliases: ["TenNhaCungCap"]
+      sort_by: ["MaKH"]
+      numeric_tolerance: 0.01
+
+  - answer_view: "Cau2"
+    expected_output:
+      columns:
+        - canonical: "MaNV"
+          type: "text"
+        - canonical: "TenNV"
+          type: "text"
+      sort_by: ["MaNV"]
+      numeric_tolerance: 0.01
+
+  - answer_view: "Cau3"
+    expected_output:
+      columns:
+        - canonical: "MaKH"
+          type: "text"
+        - canonical: "TenKH"
+          type: "text"
+      sort_by: ["MaKH"]
+      numeric_tolerance: 0.01

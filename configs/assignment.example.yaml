@@ -1,0 +1,59 @@
+assignment:
+  name: "Sales Database Assignment"
+  protected_answer_db: "00000001"
+
+schema:
+  matching_threshold: 0.8
+  aliases:
+    tables:
+      NhanVien: ["Employee", "NV", "DMNhanVien"]
+      KhachHang: ["Customer", "KH", "DMKhachHang"]
+      Hang: ["Product", "Item", "DMHang"]
+      Tien: ["Payment", "ThuTien"]
+      BanHang: ["Sales", "Invoice", "HoaDon"]
+      ChiTietBanHang: ["SalesDetail", "InvoiceDetail", "ChiTietHoaDon"]
+    columns:
+      MaKH: ["CustomerID", "CustomerCode", "IDKH", "MaKhachHang"]
+      TenKH: ["CustomerName", "Name", "TenKhachHang"]
+      MaNV: ["EmployeeID", "EmployeeCode", "IDNV", "MaNhanVien"]
+      TenNV: ["EmployeeName", "TenNhanVien"]
+      MaHang: ["ProductID", "ProductCode", "IDHang", "MaHangHoa"]
+      TenHang: ["ProductName", "TenHangHoa"]
+      SoLuong: ["Quantity", "Qty"]
+      DonGia: ["UnitPrice", "Price"]
+      ThanhTien: ["Amount", "TotalAmount", "TongTien"]
+
+views:
+  - answer_view: "Cau1"
+    expected_output:
+      columns:
+        - canonical: "MaKH"
+          type: "text"
+          aliases: ["CustomerID", "CustomerCode"]
+        - canonical: "TenKH"
+          type: "text"
+          aliases: ["CustomerName", "Name"]
+      sort_by: ["MaKH"]
+      numeric_tolerance: 0.01
+
+  - answer_view: "Cau2"
+    expected_output:
+      columns:
+        - canonical: "MaNV"
+          type: "text"
+          aliases: ["EmployeeID"]
+        - canonical: "TenNV"
+          type: "text"
+          aliases: ["EmployeeName"]
+      sort_by: ["MaNV"]
+      numeric_tolerance: 0.01
+
+  - answer_view: "Cau3"
+    expected_output:
+      columns:
+        - canonical: "MaKH"
+          type: "text"
+        - canonical: "TenKH"
+          type: "text"
+      sort_by: ["MaKH"]
+      numeric_tolerance: 0.01

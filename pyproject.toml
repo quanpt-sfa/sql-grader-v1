@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sqlserver-schema-view-checker"
+version = "0.1.0"
+description = "A lightweight SQL Server assignment schema and view behavior checker"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pyodbc",
+    "pandas",
+    "pyyaml",
+    "rapidfuzz",
+    "python-dotenv"
+]
+
+[project.scripts]
+dbcheck = "dbcheck.cli.main:main"
