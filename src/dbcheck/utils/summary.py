@@ -200,10 +200,12 @@ def compile_summary(run_dir: Path) -> Path:
         # View stats
         if view_report.exists():
             try:
+                statuses = []
                 with open(view_report, "r", encoding="utf-8") as vf:
                     for v_row in csv.DictReader(vf):
                         row["view_required_count"] += 1
                         v_status = v_row["status"].upper()
+                        statuses.append(v_status)
                         dest = _VIEW_STATUS_MAP.get(v_status)
                         if dest:
                             row[dest] += 1
@@ -211,6 +213,15 @@ def compile_summary(run_dir: Path) -> Path:
                             row["view_ambiguous_count"] += 1
                         elif "ERROR" in v_status:
                             row["view_execution_error_count"] += 1
+                non_pass = [s for s in statuses if s not in ("VIEW_PASS", "PASS")]
+                if non_pass:
+                    if any("ERROR" in s for s in non_pass):
+                        row["view_test_status"] = "ERROR"
+                    else:
+                        row["view_test_status"] = non_pass[0]
+                else:
+                    if statuses:
+                        row["view_test_status"] = "OK"
             except Exception as e:
                 logger.warning(f"Error reading view report for '{sub_id}': {e}")
 

@@ -178,27 +178,3 @@ views:
         sort_by: ["TenNhaCungCap"]
         numeric_tolerance: 0.01
 
-    - answer_view: "Cau4"
-      answer_required: false
-      student_required: true
-      check_mode: "execution_only"
-      order_sensitive: false
-      expected_output:
-        columns:
-          - canonical: "PhieuMuaHang"
-            type: "text"
-            aliases: ["PhieuMuaHang", "PMH", "SoHoaDon", "MaHD"]
-          - canonical: "NgayMuaHang"
-            type: "date"
-            aliases: ["NgayMuaHang", "NgayMua", "Ngay", "NgayHD"]
-          - canonical: "MaNhaCungCap"
-            type: "text"
-            aliases: ["MaNhaCungCap", "MaNCC"]
-          - canonical: "MaNhanVien"
-            type: "text"
-            aliases: ["MaNhanVien", "MaNV"]
-          - canonical: "MaLoaiTien"
-            type: "text"
-            aliases: ["MaLoaiTien", "LoaiTien", "MaTien"]
-        sort_by: ["PhieuMuaHang"]
-        numeric_tolerance: 0.01

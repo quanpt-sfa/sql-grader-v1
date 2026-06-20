@@ -158,6 +158,51 @@ def _write_command_error_summary(
         logger.error(f"Failed to write COMMAND_ERROR summary: {e}")
 
 
+def _write_view_execution_error_report(report_path: Path, sub_id: str, ans_snap: Dict[str, Any], config: Any, err_msg: str):
+    from dbcheck.views.view_reporter import _resolve_expected_views
+    try:
+        expected_views = _resolve_expected_views(
+            config, 
+            ans_snap.get("views", []), 
+            ans_snap.get("view_columns", [])
+        )
+        view_names = [v.answer_view for v in expected_views]
+    except Exception:
+        view_names = [v.get("view_name_canonical") or v.get("view_name") for v in ans_snap.get("views", [])]
+        if not view_names and hasattr(config, "views"):
+            view_names = [v.answer_view for v in config.views]
+            
+    if not view_names:
+        view_names = ["UnknownView"]
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    headers = [
+        "submission_id", "answer_view", "student_view", "status",
+        "matched_columns", "missing_columns", "extra_columns",
+        "row_count_answer", "row_count_student", "answer_minus_student_count",
+        "student_minus_answer_count", "value_mismatch_count", "execution_error"
+    ]
+    with open(report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for vn in view_names:
+            writer.writerow({
+                "submission_id": sub_id,
+                "answer_view": vn,
+                "student_view": "",
+                "status": "VIEW_EXECUTION_ERROR",
+                "matched_columns": "",
+                "missing_columns": "",
+                "extra_columns": "",
+                "row_count_answer": -1,
+                "row_count_student": -1,
+                "answer_minus_student_count": -1,
+                "student_minus_answer_count": -1,
+                "value_mismatch_count": -1,
+                "execution_error": err_msg
+            })
+
+
 # ---------------------------------------------------------------------------
 # Main command
 # ---------------------------------------------------------------------------
@@ -299,7 +344,7 @@ def run_test_views(args):
                 manifest.update(
                     submission_id=sub_id,
                     source_path=bak_file,
-                    status="OK",
+                    status=status,
                     error_code="",
                     error_message="",
                 )
@@ -308,12 +353,13 @@ def run_test_views(args):
             except Exception as e:
                 err_msg = str(e)
                 logger.error(f"View testing failed for '{sub_id}': {err_msg}")
+                _write_view_execution_error_report(report_path, sub_id, ans_snap, config, err_msg)
                 manifest.update(
                     submission_id=sub_id,
                     source_path=bak_file,
-                    status="ERROR",
-                    error_code="VIEW_TEST_ERROR",
-                    error_message=err_msg,
+                    status=status,
+                    error_code="",
+                    error_message="",
                 )
 
             finally:

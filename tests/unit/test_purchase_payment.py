@@ -97,7 +97,7 @@ def test_view_configs():
     config = load_config("configs/assignment_purchase_payment_ca3.yaml")
     
     # D. View config checks
-    assert len(config.views) == 4
+    assert len(config.views) == 3
     
     cau1 = config.views[0]
     assert cau1.answer_view == "Cau1"
@@ -105,8 +105,3 @@ def test_view_configs():
     assert cau1.student_required is True
     assert cau1.check_mode == "full"
 
-    cau4 = config.views[3]
-    assert cau4.answer_view == "Cau4"
-    assert cau4.answer_required is False
-    assert cau4.student_required is True
-    assert cau4.check_mode == "execution_only"

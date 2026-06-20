@@ -52,34 +52,40 @@ schema:
       DonGia: ["UnitPrice", "DonGia"]
 
 views:
-  - answer_view: "Cau1"
-    expected_output:
-      columns:
-        - canonical: "MaKH"
-          type: "text"
-          aliases: ["MaNhaCungCap"]
-        - canonical: "TenKH"
-          type: "text"
-          aliases: ["TenNhaCungCap"]
-      sort_by: ["MaKH"]
-      numeric_tolerance: 0.01
+  mode: answer_snapshot
+  execution_mode: compare_existing_data
+  export_outputs: true
+  compare_as_multiset: true
+  expected:
+    - answer_view: "Cau1"
+      expected_output:
+        columns:
+          - canonical: "MaKH"
+            type: "text"
+            aliases: ["MaNhaCungCap"]
+          - canonical: "TenKH"
+            type: "text"
+            aliases: ["TenNhaCungCap"]
+        sort_by: ["MaKH"]
+        numeric_tolerance: 0.01
 
-  - answer_view: "Cau2"
-    expected_output:
-      columns:
-        - canonical: "MaNV"
-          type: "text"
-        - canonical: "TenNV"
-          type: "text"
-      sort_by: ["MaNV"]
-      numeric_tolerance: 0.01
+    - answer_view: "Cau2"
+      expected_output:
+        columns:
+          - canonical: "MaNV"
+            type: "text"
+          - canonical: "TenNV"
+            type: "text"
+        sort_by: ["MaNV"]
+        numeric_tolerance: 0.01
 
-  - answer_view: "Cau3"
-    expected_output:
-      columns:
-        - canonical: "MaKH"
-          type: "text"
-        - canonical: "TenKH"
-          type: "text"
-      sort_by: ["MaKH"]
-      numeric_tolerance: 0.01
+    - answer_view: "Cau3"
+      expected_output:
+        columns:
+          - canonical: "MaKH"
+            type: "text"
+          - canonical: "TenKH"
+            type: "text"
+        sort_by: ["MaKH"]
+        numeric_tolerance: 0.01
+

@@ -384,7 +384,7 @@ class App:
     def _load_defaults(self):
         self.ans_bak_var.set("solution/dapan.bak")
         self.subs_var.set("exams/")
-        self.config_var.set("configs/assignment.yaml")
+        self.config_var.set("configs/assignment_purchase_payment_ca3.yaml")
         self.test_data_var.set("test_data/")
         self._refresh_run_dir()
         if AVAILABLE_DRIVERS:
