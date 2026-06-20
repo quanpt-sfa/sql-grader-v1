@@ -16,6 +16,7 @@ import os
 import csv
 from pathlib import Path
 from datetime import datetime
+from typing import Dict, Any, List
 
 from dbcheck.config import load_config
 from dbcheck.sqlserver.connection import SQLServerConnection

@@ -155,8 +155,9 @@ def build_test_views_command(run_dir: str, test_data: str, config: str, answer_b
         "--run-dir", str(Path(run_dir.strip())),
         "--config", str(Path(config.strip()))
     ]
-    if execution_mode == "compare_seeded_test_data" and test_data.strip():
-        cmd.extend(["--test-data", str(Path(test_data.strip()))])
+    if execution_mode == "compare_seeded_test_data":
+        if test_data and test_data.strip():
+            cmd.extend(["--test-data", str(Path(test_data.strip()))])
     if answer_bak and answer_bak.strip():
         cmd.extend(["--answer-bak", str(Path(answer_bak.strip()))])
     return cmd
@@ -183,8 +184,8 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("SQL Server Assignment Grader GUI")
-        self.root.geometry("1050x900")
-        self.root.minsize(950, 800)
+        self.root.geometry("1100x900")
+        self.root.minsize(1000, 800)
 
         # Process management variables
         self.active_process: Optional[subprocess.Popen] = None
@@ -218,121 +219,106 @@ class App:
     def _create_widgets(self):
         # Configure master layout grid
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(3, weight=1)  # Notebook/middle pane scales
+        self.root.rowconfigure(0, weight=0)  # Top 3-panel frame
+        self.root.rowconfigure(1, weight=0)  # Pipeline Control panel
+        self.root.rowconfigure(2, weight=1)  # Notebook section (expands)
+        self.root.rowconfigure(3, weight=0)  # Bottom navigation frame
 
         # ----------------------------------------------------
-        # Frame A: Input Paths
+        # Row 0: Top Horizontal 3-Panel Frame
         # ----------------------------------------------------
-        path_frame = ttk.LabelFrame(self.root, text=" Input Paths ", padding=10)
-        path_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+        top_frame = ttk.Frame(self.root)
+        top_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=5)
+        top_frame.columnconfigure(0, weight=3)
+        top_frame.columnconfigure(1, weight=2)
+        top_frame.columnconfigure(2, weight=2)
+
+        # Panel 1: Input Paths (Column 0, weight 3)
+        path_frame = ttk.LabelFrame(top_frame, text=" Input Paths ", padding=10)
+        path_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         path_frame.columnconfigure(1, weight=1)
 
         # Answer Backup
-        ttk.Label(path_frame, text="Answer Backup (.bak):").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Label(path_frame, text="Answer Backup:").grid(row=0, column=0, sticky="w", pady=2)
         self.ans_bak_var = tk.StringVar()
-        ttk.Entry(path_frame, textvariable=self.ans_bak_var).grid(row=0, column=1, sticky="ew", padx=5, pady=3)
-        ttk.Button(path_frame, text="Browse...", command=self._browse_ans_bak).grid(row=0, column=2, pady=3)
+        ttk.Entry(path_frame, textvariable=self.ans_bak_var).grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+        ttk.Button(path_frame, text="Browse...", command=self._browse_ans_bak).grid(row=0, column=2, pady=2)
 
         # Student Submissions
-        ttk.Label(path_frame, text="Submissions Folder:").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Label(path_frame, text="Submissions:").grid(row=1, column=0, sticky="w", pady=2)
         self.subs_var = tk.StringVar()
-        ttk.Entry(path_frame, textvariable=self.subs_var).grid(row=1, column=1, sticky="ew", padx=5, pady=3)
-        ttk.Button(path_frame, text="Browse...", command=self._browse_subs).grid(row=1, column=2, pady=3)
+        ttk.Entry(path_frame, textvariable=self.subs_var).grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+        ttk.Button(path_frame, text="Browse...", command=self._browse_subs).grid(row=1, column=2, pady=2)
 
         # Config File
-        ttk.Label(path_frame, text="Config (.yaml):").grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Label(path_frame, text="Config:").grid(row=2, column=0, sticky="w", pady=2)
         self.config_var = tk.StringVar()
-        ttk.Entry(path_frame, textvariable=self.config_var).grid(row=2, column=1, sticky="ew", padx=5, pady=3)
-        ttk.Button(path_frame, text="Browse...", command=self._browse_config).grid(row=2, column=2, pady=3)
+        ttk.Entry(path_frame, textvariable=self.config_var).grid(row=2, column=1, sticky="ew", padx=5, pady=2)
+        ttk.Button(path_frame, text="Browse...", command=self._browse_config).grid(row=2, column=2, pady=2)
 
         # Test Data Folder
-        ttk.Label(path_frame, text="Test Data Folder:").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Label(path_frame, text="Test Data:").grid(row=3, column=0, sticky="w", pady=2)
         self.test_data_var = tk.StringVar()
         self.test_data_entry = ttk.Entry(path_frame, textvariable=self.test_data_var)
-        self.test_data_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=3)
+        self.test_data_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
         self.btn_browse_test_data = ttk.Button(path_frame, text="Browse...", command=self._browse_test_data)
-        self.btn_browse_test_data.grid(row=3, column=2, pady=3)
+        self.btn_browse_test_data.grid(row=3, column=2, pady=2)
 
         # Run Directory
-        ttk.Label(path_frame, text="Run Directory:").grid(row=4, column=0, sticky="w", pady=3)
+        ttk.Label(path_frame, text="Run Dir:").grid(row=4, column=0, sticky="w", pady=2)
         self.run_dir_var = tk.StringVar()
-        
         run_dir_subframe = ttk.Frame(path_frame)
-        run_dir_subframe.grid(row=4, column=1, sticky="ew", padx=5, pady=3)
+        run_dir_subframe.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
         run_dir_subframe.columnconfigure(0, weight=1)
-        
         ttk.Entry(run_dir_subframe, textvariable=self.run_dir_var).grid(row=0, column=0, sticky="ew")
-        ttk.Button(run_dir_subframe, text="🔄 Refresh Name", command=self._refresh_run_dir).grid(row=0, column=1, padx=(5, 0))
-        ttk.Button(path_frame, text="Browse...", command=self._browse_run_dir).grid(row=4, column=2, pady=3)
+        ttk.Button(run_dir_subframe, text="🔄 Refresh", command=self._refresh_run_dir).grid(row=0, column=1, padx=(5, 0))
+        ttk.Button(path_frame, text="Browse...", command=self._browse_run_dir).grid(row=4, column=2, pady=2)
 
-        # ----------------------------------------------------
-        # Frame B: Config Summary
-        # ----------------------------------------------------
-        config_summary_frame = ttk.LabelFrame(self.root, text=" Selected Config Summary ", padding=10)
-        config_summary_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
-        config_summary_frame.columnconfigure((1, 3, 5, 7), weight=1)
+        # Panel 2: Selected Config Summary (Column 1, weight 2)
+        config_summary_frame = ttk.LabelFrame(top_frame, text=" Selected Config Summary ", padding=10)
+        config_summary_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        config_summary_frame.columnconfigure(1, weight=1)
 
-        # Labels for Config Details
-        ttk.Label(config_summary_frame, text="Assignment:").grid(row=0, column=0, sticky="w", pady=2)
-        self.lbl_cfg_name = ttk.Label(config_summary_frame, font=("Segoe UI", 9, "bold"), text="-")
-        self.lbl_cfg_name.grid(row=0, column=1, sticky="w", pady=2, padx=5)
+        labels_cfg = [
+            ("Assignment:", "lbl_cfg_name"),
+            ("Views Mode:", "lbl_views_mode"),
+            ("Execution Mode:", "lbl_exec_mode"),
+            ("Export Outputs:", "lbl_export_out"),
+            ("Multiset Compare:", "lbl_multiset"),
+            ("Key Grading Mode:", "lbl_key_mode"),
+            ("Allow Surrogate Keys:", "lbl_allow_surr"),
+            ("Allow Natural Keys:", "lbl_allow_nat")
+        ]
+        for idx, (label_text, attr_name) in enumerate(labels_cfg):
+            ttk.Label(config_summary_frame, text=label_text).grid(row=idx, column=0, sticky="w", pady=1)
+            lbl_val = ttk.Label(config_summary_frame, text="-", font=("Segoe UI", 9, "bold") if idx == 0 else ("Segoe UI", 9))
+            lbl_val.grid(row=idx, column=1, sticky="w", padx=5, pady=1)
+            setattr(self, attr_name, lbl_val)
 
-        ttk.Label(config_summary_frame, text="Views Mode:").grid(row=0, column=2, sticky="w", pady=2)
-        self.lbl_views_mode = ttk.Label(config_summary_frame, text="-")
-        self.lbl_views_mode.grid(row=0, column=3, sticky="w", pady=2, padx=5)
+        self.lbl_config_note = ttk.Label(config_summary_frame, font=("Segoe UI", 8, "italic"), foreground="#005999", wraplength=250, justify="left", text="")
+        self.lbl_config_note.grid(row=8, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
-        ttk.Label(config_summary_frame, text="Execution Mode:").grid(row=0, column=4, sticky="w", pady=2)
-        self.lbl_exec_mode = ttk.Label(config_summary_frame, text="-")
-        self.lbl_exec_mode.grid(row=0, column=5, sticky="w", pady=2, padx=5)
-
-        ttk.Label(config_summary_frame, text="Export Outputs:").grid(row=0, column=6, sticky="w", pady=2)
-        self.lbl_export_out = ttk.Label(config_summary_frame, text="-")
-        self.lbl_export_out.grid(row=0, column=7, sticky="w", pady=2, padx=5)
-
-        # Row 1 of config summaries
-        ttk.Label(config_summary_frame, text="Multiset:").grid(row=1, column=0, sticky="w", pady=2)
-        self.lbl_multiset = ttk.Label(config_summary_frame, text="-")
-        self.lbl_multiset.grid(row=1, column=1, sticky="w", pady=2, padx=5)
-
-        ttk.Label(config_summary_frame, text="Key Grading Mode:").grid(row=1, column=2, sticky="w", pady=2)
-        self.lbl_key_mode = ttk.Label(config_summary_frame, text="-")
-        self.lbl_key_mode.grid(row=1, column=3, sticky="w", pady=2, padx=5)
-
-        ttk.Label(config_summary_frame, text="Allow Surrogate:").grid(row=1, column=4, sticky="w", pady=2)
-        self.lbl_allow_surr = ttk.Label(config_summary_frame, text="-")
-        self.lbl_allow_surr.grid(row=1, column=5, sticky="w", pady=2, padx=5)
-
-        ttk.Label(config_summary_frame, text="Allow Natural:").grid(row=1, column=6, sticky="w", pady=2)
-        self.lbl_allow_nat = ttk.Label(config_summary_frame, text="-")
-        self.lbl_allow_nat.grid(row=1, column=7, sticky="w", pady=2, padx=5)
-
-        self.lbl_config_note = ttk.Label(config_summary_frame, font=("Segoe UI", 9, "italic"), foreground="#005999", text="")
-        self.lbl_config_note.grid(row=2, column=0, columnspan=8, sticky="w", pady=(5, 0))
-
-        # ----------------------------------------------------
-        # Frame C: SQL Server Settings
-        # ----------------------------------------------------
-        sql_frame = ttk.LabelFrame(self.root, text=" SQL Server Connection Settings ", padding=10)
-        sql_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
+        # Panel 3: SQL Server Connection Settings (Column 2, weight 2)
+        sql_frame = ttk.LabelFrame(top_frame, text=" SQL Server Settings ", padding=10)
+        sql_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
         sql_frame.columnconfigure(1, weight=1)
-        sql_frame.columnconfigure(3, weight=1)
 
         # Server name
-        ttk.Label(sql_frame, text="Server Name:").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Label(sql_frame, text="Server Name:").grid(row=0, column=0, sticky="w", pady=2)
         self.server_var = tk.StringVar(value=".")
-        ttk.Entry(sql_frame, textvariable=self.server_var).grid(row=0, column=1, sticky="ew", padx=5, pady=3)
+        ttk.Entry(sql_frame, textvariable=self.server_var).grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
         # Driver
-        ttk.Label(sql_frame, text="Driver:").grid(row=0, column=2, sticky="w", pady=3)
+        ttk.Label(sql_frame, text="Driver:").grid(row=1, column=0, sticky="w", pady=2)
         self.driver_var = tk.StringVar()
         self.driver_combo = ttk.Combobox(sql_frame, textvariable=self.driver_var, values=AVAILABLE_DRIVERS)
-        self.driver_combo.grid(row=0, column=3, sticky="ew", padx=5, pady=3)
+        self.driver_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
         if not AVAILABLE_DRIVERS:
             self.driver_var.set("ODBC Driver 17 for SQL Server")
             self.log("[WARNING] Could not discover SQL Server drivers via pyodbc. Driver field remains editable.\n")
 
         # Authentication mode
-        ttk.Label(sql_frame, text="Authentication:").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Label(sql_frame, text="Authentication:").grid(row=2, column=0, sticky="w", pady=2)
         self.auth_var = tk.StringVar(value="Windows Authentication")
         self.auth_combo = ttk.Combobox(
             sql_frame, 
@@ -340,47 +326,87 @@ class App:
             values=["Windows Authentication", "SQL Server Authentication"], 
             state="readonly"
         )
-        self.auth_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=3)
+        self.auth_combo.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
         self.auth_combo.bind("<<ComboboxSelected>>", self._on_auth_change)
 
         # Username
         self.user_label = ttk.Label(sql_frame, text="Username:")
-        self.user_label.grid(row=1, column=2, sticky="w", pady=3)
+        self.user_label.grid(row=3, column=0, sticky="w", pady=2)
         self.user_var = tk.StringVar()
         self.user_entry = ttk.Entry(sql_frame, textvariable=self.user_var)
-        self.user_entry.grid(row=1, column=3, sticky="ew", padx=5, pady=3)
+        self.user_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
 
         # Password
         self.pass_label = ttk.Label(sql_frame, text="Password:")
-        self.pass_label.grid(row=2, column=2, sticky="w", pady=3)
+        self.pass_label.grid(row=4, column=0, sticky="w", pady=2)
         self.pass_var = tk.StringVar()
         self.pass_entry = ttk.Entry(sql_frame, textvariable=self.pass_var, show="*")
-        self.pass_entry.grid(row=2, column=3, sticky="ew", padx=5, pady=3)
+        self.pass_entry.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
 
         # Trust Cert checkbox
         self.trust_var = tk.BooleanVar(value=True)
         self.trust_check = ttk.Checkbutton(sql_frame, text="Trust Server Certificate (Encrypt=No)", variable=self.trust_var)
-        self.trust_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=3)
+        self.trust_check.grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
 
         self._update_auth_fields_state()
 
         # ----------------------------------------------------
-        # Middle Frame: Notebook + Logs split in PanedWindow
+        # Row 1: Pipeline Execution Control Panel
         # ----------------------------------------------------
-        middle_pane = ttk.PanedWindow(self.root, orient="vertical")
-        middle_pane.grid(row=3, column=0, sticky="nsew", padx=10, pady=5)
+        control_frame = ttk.LabelFrame(self.root, text=" Pipeline Execution Control ", padding=10)
+        control_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+        control_frame.columnconfigure(1, weight=1)
 
-        # Top half: Log ScrolledText panel
-        log_frame = ttk.LabelFrame(middle_pane, text=" Execution Log Console ", padding=5)
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, font=("Consolas", 9), bg="#fafafa")
-        self.log_text.grid(row=0, column=0, sticky="nsew")
-        middle_pane.add(log_frame, weight=1)
+        # Row 0: Action Buttons
+        buttons_frame = ttk.Frame(control_frame)
+        buttons_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
 
-        # Bottom half: Notebook for table, dashboard, review queue, files
-        self.notebook = ttk.Notebook(middle_pane)
-        middle_pane.add(self.notebook, weight=1)
+        self.btn_snap = ttk.Button(buttons_frame, text="Run Snapshot", command=lambda: self._run_command_pipeline("snapshot"))
+        self.btn_snap.grid(row=0, column=0, padx=5)
+
+        self.btn_comp = ttk.Button(buttons_frame, text="Compare Structure", command=lambda: self._run_command_pipeline("compare-structure"))
+        self.btn_comp.grid(row=0, column=1, padx=5)
+
+        self.btn_views = ttk.Button(buttons_frame, text="Test Views", command=lambda: self._run_command_pipeline("test-views"))
+        self.btn_views.grid(row=0, column=2, padx=5)
+
+        self.btn_export = ttk.Button(buttons_frame, text="Export Results", command=lambda: self._run_command_pipeline("export-results"))
+        self.btn_export.grid(row=0, column=3, padx=5)
+
+        self.btn_full = ttk.Button(buttons_frame, text="Run Full Pipeline", style="Primary.TButton", command=lambda: self._run_command_pipeline("full"))
+        self.btn_full.grid(row=0, column=4, padx=5)
+
+        self.btn_stop = ttk.Button(buttons_frame, text="Stop", style="Stop.TButton", command=self._stop_process)
+        self.btn_stop.grid(row=0, column=5, padx=5)
+        self.btn_stop.config(state="disabled")
+
+        self.btn_refresh = ttk.Button(buttons_frame, text="Refresh Results", command=self._on_refresh_clicked)
+        self.btn_refresh.grid(row=0, column=6, padx=5)
+
+        self.all_action_buttons = [self.btn_snap, self.btn_comp, self.btn_views, self.btn_export, self.btn_full, self.btn_refresh]
+
+        # Row 1: Progress elements
+        progress_frame = ttk.Frame(control_frame)
+        progress_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        progress_frame.columnconfigure(2, weight=1)
+
+        self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", length=300)
+        self.progress_bar.grid(row=0, column=0, padx=5, sticky="w")
+
+        self.lbl_step_counter = ttk.Label(progress_frame, text="Step 0/4", font=("Segoe UI", 9, "bold"))
+        self.lbl_step_counter.grid(row=0, column=1, padx=10, sticky="w")
+
+        self.lbl_step_name = ttk.Label(progress_frame, text="Idle", font=("Segoe UI", 9))
+        self.lbl_step_name.grid(row=0, column=2, padx=10, sticky="w")
+
+        self.lbl_last_status = ttk.Label(progress_frame, text="Status: Ready", font=("Segoe UI", 9, "bold"))
+        self.lbl_last_status.grid(row=0, column=3, padx=10, sticky="e")
+
+        # ----------------------------------------------------
+        # Row 2: Results Notebook
+        # ----------------------------------------------------
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
 
         # Tab 1: Grading Summary Table
         tab_summary = ttk.Frame(self.notebook, padding=5)
@@ -427,17 +453,53 @@ class App:
 
         filter_frame = ttk.Frame(tab_rq, padding=5)
         filter_frame.grid(row=0, column=0, sticky="ew")
-        ttk.Label(filter_frame, text="Filter:").pack(side="left", padx=5)
         
+        # Row 0 filters
+        ttk.Label(filter_frame, text="Category:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
         self.rq_filter_var = tk.StringVar(value="All Items")
         self.rq_filter_combo = ttk.Combobox(
             filter_frame, 
             textvariable=self.rq_filter_var,
             values=["All Items", "Hard Errors Only", "Review Required Only", "View Issues Only", "PK/FK Issues Only", "Mapping Issues Only"],
-            state="readonly"
+            state="readonly",
+            width=20
         )
-        self.rq_filter_combo.pack(side="left", padx=5)
+        self.rq_filter_combo.grid(row=0, column=1, sticky="w", padx=2, pady=2)
         self.rq_filter_combo.bind("<<ComboboxSelected>>", self._on_filter_changed)
+        
+        ttk.Label(filter_frame, text="Submission ID:").grid(row=0, column=2, sticky="w", padx=5, pady=2)
+        self.rq_sub_id_var = tk.StringVar()
+        self.rq_sub_id_entry = ttk.Entry(filter_frame, textvariable=self.rq_sub_id_var, width=15)
+        self.rq_sub_id_entry.grid(row=0, column=3, sticky="w", padx=2, pady=2)
+        self.rq_sub_id_var.trace_add("write", self._on_filter_changed)
+        
+        ttk.Label(filter_frame, text="Source Report:").grid(row=0, column=4, sticky="w", padx=5, pady=2)
+        self.rq_report_var = tk.StringVar()
+        self.rq_report_entry = ttk.Entry(filter_frame, textvariable=self.rq_report_var, width=20)
+        self.rq_report_entry.grid(row=0, column=5, sticky="w", padx=2, pady=2)
+        self.rq_report_var.trace_add("write", self._on_filter_changed)
+
+        # Row 1 filters
+        ttk.Label(filter_frame, text="Component:").grid(row=1, column=0, sticky="w", padx=2, pady=2)
+        self.rq_component_var = tk.StringVar()
+        self.rq_component_entry = ttk.Entry(filter_frame, textvariable=self.rq_component_var, width=20)
+        self.rq_component_entry.grid(row=1, column=1, sticky="w", padx=2, pady=2)
+        self.rq_component_var.trace_add("write", self._on_filter_changed)
+
+        ttk.Label(filter_frame, text="Status:").grid(row=1, column=2, sticky="w", padx=5, pady=2)
+        self.rq_status_var = tk.StringVar()
+        self.rq_status_entry = ttk.Entry(filter_frame, textvariable=self.rq_status_var, width=15)
+        self.rq_status_entry.grid(row=1, column=3, sticky="w", padx=2, pady=2)
+        self.rq_status_var.trace_add("write", self._on_filter_changed)
+
+        ttk.Label(filter_frame, text="Severity:").grid(row=1, column=4, sticky="w", padx=5, pady=2)
+        self.rq_severity_var = tk.StringVar()
+        self.rq_severity_entry = ttk.Entry(filter_frame, textvariable=self.rq_severity_var, width=20)
+        self.rq_severity_entry.grid(row=1, column=5, sticky="w", padx=2, pady=2)
+        self.rq_severity_var.trace_add("write", self._on_filter_changed)
+        
+        btn_clear_filters = ttk.Button(filter_frame, text="Clear Filters", command=self._clear_rq_filters)
+        btn_clear_filters.grid(row=1, column=6, padx=10, pady=2)
 
         rq_scroll_y = ttk.Scrollbar(tab_rq, orient="vertical")
         rq_scroll_x = ttk.Scrollbar(tab_rq, orient="horizontal")
@@ -453,7 +515,7 @@ class App:
         rq_scroll_y.grid(row=1, column=1, sticky="ns")
         rq_scroll_x.grid(row=2, column=0, sticky="ew")
         
-        rq_cols = ["Submission ID", "Category", "Component", "Status", "Severity", "Message", "Suggested Action", "Evidence"]
+        rq_cols = ["Submission ID", "Category", "Source Report", "Component", "Status", "Severity", "Message", "Suggested Action", "Evidence"]
         self.rq_tree["columns"] = rq_cols
         self.rq_tree.column("#0", width=0, stretch=False)
         for col in rq_cols:
@@ -466,9 +528,10 @@ class App:
         
         self.files_list = [
             ("summary.xlsx", "summary.xlsx"),
-            ("review_queue.xlsx", "review_queue.xlsx"),
-            ("hard_errors.csv", "hard_errors.csv"),
             ("summary.csv", "summary.csv"),
+            ("review_queue.xlsx", "review_queue.xlsx"),
+            ("review_queue.csv", "review_queue.csv"),
+            ("hard_errors.csv", "hard_errors.csv"),
             ("execution.log", "execution.log"),
             ("student_feedback Folder", "student_feedback"),
             ("Run Directory Root", "")
@@ -489,36 +552,20 @@ class App:
             
             self.file_widgets.append((lbl_status, btn_open, subpath))
 
-        # ----------------------------------------------------
-        # Action Control Panel
-        # ----------------------------------------------------
-        action_frame = ttk.Frame(self.root, padding=5)
-        action_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
-
-        self.btn_snap = ttk.Button(action_frame, text="Run Snapshot", command=lambda: self._run_command_pipeline("snapshot"))
-        self.btn_snap.pack(side="left", padx=5)
-
-        self.btn_comp = ttk.Button(action_frame, text="Run Compare Structure", command=lambda: self._run_command_pipeline("compare-structure"))
-        self.btn_comp.pack(side="left", padx=5)
-
-        self.btn_views = ttk.Button(action_frame, text="Run Test Views", command=lambda: self._run_command_pipeline("test-views"))
-        self.btn_views.pack(side="left", padx=5)
-
-        self.btn_export = ttk.Button(action_frame, text="Export Results", command=lambda: self._run_command_pipeline("export-results"))
-        self.btn_export.pack(side="left", padx=5)
-
-        self.btn_full = ttk.Button(action_frame, text="Run Full Pipeline", style="Primary.TButton", command=lambda: self._run_command_pipeline("full"))
-        self.btn_full.pack(side="left", padx=5)
-
-        self.btn_stop = ttk.Button(action_frame, text="Stop Current Process", style="Stop.TButton", command=self._stop_process)
-        self.btn_stop.pack(side="left", padx=5)
-        self.btn_stop.config(state="disabled")
+        # Tab 5: Console / Logs
+        tab_logs = ttk.Frame(self.notebook, padding=5)
+        self.notebook.add(tab_logs, text=" Console / Logs ")
+        tab_logs.columnconfigure(0, weight=1)
+        tab_logs.rowconfigure(0, weight=1)
+        
+        self.log_text = scrolledtext.ScrolledText(tab_logs, font=("Consolas", 9), bg="#fafafa")
+        self.log_text.grid(row=0, column=0, sticky="nsew")
 
         # ----------------------------------------------------
-        # Navigation & Reporting Frame
+        # Row 3: Bottom Navigation Buttons Frame
         # ----------------------------------------------------
         nav_frame = ttk.Frame(self.root, padding=5)
-        nav_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=5)
+        nav_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=5)
 
         self.btn_open_run = ttk.Button(nav_frame, text="Open Run Folder", command=self._open_run_folder)
         self.btn_open_run.pack(side="left", padx=5)
@@ -529,8 +576,6 @@ class App:
         self.btn_open_reports = ttk.Button(nav_frame, text="Open Mapping Reports", command=self._open_mapping_reports)
         self.btn_open_reports.pack(side="left", padx=5)
         self.btn_open_reports.config(state="disabled")
-
-        self.all_action_buttons = [self.btn_snap, self.btn_comp, self.btn_views, self.btn_export, self.btn_full]
 
     # --- Defaults and Browse Handlers ---
 
@@ -584,11 +629,11 @@ class App:
             if config.execution_mode == "compare_existing_data":
                 self.test_data_entry.config(state="disabled")
                 self.btn_browse_test_data.config(state="disabled")
-                self.lbl_config_note.config(text="Note: View testing will compare existing data from restored .bak files; no seeding.")
+                self.lbl_config_note.config(text="View testing compares existing restored .bak data; no seeding.")
             else:
                 self.test_data_entry.config(state="normal")
                 self.btn_browse_test_data.config(state="normal")
-                self.lbl_config_note.config(text="Note: View testing will seed test CSV data into databases before execution.")
+                self.lbl_config_note.config(text="View testing seeds test data; Test Data Folder is required.")
         except Exception as e:
             self._clear_config_summary()
             self.log(f"[WARNING] Failed to parse config properties: {e}\n")
@@ -663,6 +708,15 @@ class App:
     def _on_filter_changed(self, event=None):
         self._load_review_queue_data()
 
+    def _clear_rq_filters(self):
+        self.rq_filter_var.set("All Items")
+        self.rq_sub_id_var.set("")
+        self.rq_report_var.set("")
+        self.rq_component_var.set("")
+        self.rq_status_var.set("")
+        self.rq_severity_var.set("")
+        self._load_review_queue_data()
+
     # --- Logger functions ---
 
     def log(self, text: str):
@@ -675,6 +729,27 @@ class App:
         self.log(sanitized)
 
     # --- Pipeline and Process Control logic ---
+
+    def _update_progress_ui(self, progress_val=None, step_counter_text=None, step_name_text=None, last_status_text=None):
+        if progress_val is not None:
+            self.progress_bar["value"] = progress_val
+        if step_counter_text is not None:
+            self.lbl_step_counter.config(text=step_counter_text)
+        if step_name_text is not None:
+            self.lbl_step_name.config(text=step_name_text)
+        if last_status_text is not None:
+            self.lbl_last_status.config(text=last_status_text)
+            if "Failed" in last_status_text or "Error" in last_status_text:
+                self.lbl_last_status.config(foreground="red")
+            elif "Stopped" in last_status_text:
+                self.lbl_last_status.config(foreground="orange")
+            elif "Succeeded" in last_status_text or "Successfully" in last_status_text:
+                self.lbl_last_status.config(foreground="green")
+            else:
+                self.lbl_last_status.config(foreground="black")
+
+    def _on_refresh_clicked(self):
+        self._load_summary_preview()
 
     def _run_command_pipeline(self, pipeline_type: str):
         ans_bak = self.ans_bak_var.get()
@@ -736,6 +811,9 @@ class App:
             btn.config(state="disabled")
         self.btn_stop.config(state="normal")
 
+        # Auto-switch to Console / Logs tab (index 4)
+        self.notebook.select(4)
+
         self.log_text.delete("1.0", tk.END)
         self.log(f"=== Pipeline '{pipeline_type}' Started ===\n")
         self.log(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
@@ -775,9 +853,20 @@ class App:
             
         env["DB_TRUST_CERT"] = "yes" if self.trust_var.get() else "no"
 
+        total_steps = len(self.pipeline_queue)
+        current_step_idx = 0
+        completed_stages = []
+
+        self.root.after(0, lambda: self._update_progress_ui(0, f"Step 0/{total_steps}", "Starting...", "Status: Running"))
+
         while self.pipeline_queue and not self.stop_requested and not pipeline_failed:
             cmd, cmd_name = self.pipeline_queue.pop(0)
+            current_step_idx += 1
             
+            step_text = f"Step {current_step_idx}/{total_steps}: {cmd_name}"
+            run_text = f"Running {cmd_name}..."
+            self.root.after(0, lambda st=step_text, rt=run_text: self._update_progress_ui(None, st, rt, "Status: Running"))
+
             self.log(f"--- Running stage: {cmd_name} ---\n")
             cmd_str_clean = " ".join(cmd)
             self.log(f"Command: {cmd_str_clean}\n")
@@ -818,10 +907,30 @@ class App:
                 if exit_code != 0:
                     pipeline_failed = True
                     self.log(f"[ERROR] Stage '{cmd_name}' failed with exit code {exit_code}. Fail-fast active: aborting remaining stages.\n")
+                    self.root.after(0, lambda cn=cmd_name: self.lbl_last_status.config(text=f"Status: {cn} Failed", foreground="red"))
+                else:
+                    completed_stages.append(cmd_name)
+                    if total_steps == 4:  # Full Pipeline
+                        if cmd_name == "Create Snapshot":
+                            progress_val = 25
+                        elif cmd_name == "Compare Structure":
+                            progress_val = 50
+                        elif cmd_name == "Test Views":
+                            progress_val = 75
+                        elif cmd_name == "Export Results":
+                            progress_val = 100
+                        else:
+                            progress_val = int(100 * (current_step_idx / total_steps))
+                    else:
+                        progress_val = int(100 * (current_step_idx / total_steps))
+                        
+                    status_text = f"Status: {cmd_name} Succeeded"
+                    self.root.after(0, lambda val=progress_val, st=status_text: self._update_progress_ui(val, None, None, st))
 
             except Exception as e:
                 pipeline_failed = True
                 self.log(f"[ERROR] Exception running stage '{cmd_name}': {e}\n\n")
+                self.root.after(0, lambda cn=cmd_name: self.lbl_last_status.config(text=f"Status: {cn} Error", foreground="red"))
 
         self.active_process = None
         elapsed_total = time.time() - start_time_total
@@ -832,18 +941,29 @@ class App:
         
         if self.stop_requested:
             self.log("[STATUS] Pipeline was cancelled by user.\n")
+            status_lbl = "Status: Stopped by user"
+            self.root.after(0, lambda: self._update_progress_ui(None, "Step 0/0", "Stopped by user", status_lbl))
         elif pipeline_failed:
             self.log("[STATUS] Pipeline completed with errors.\n")
+            status_lbl = "Status: Failed"
+            self.root.after(0, lambda: self._update_progress_ui(None, None, "Failed", status_lbl))
         else:
             self.log("[STATUS] Pipeline completed successfully!\n")
+            status_lbl = "Status: Completed Successfully"
+            self.root.after(0, lambda: self._update_progress_ui(100, None, "Success", status_lbl))
 
-        self.root.after(0, self._on_pipeline_finished)
+        # Refresh metrics only if Export Results succeeded and the pipeline was NOT cancelled.
+        should_refresh = ("Export Results" in completed_stages) and not self.stop_requested
+        self.root.after(0, lambda sr=should_refresh: self._on_pipeline_finished(sr))
 
-    def _on_pipeline_finished(self):
+    def _on_pipeline_finished(self, should_refresh: bool):
         for btn in self.all_action_buttons:
             btn.config(state="normal")
         self.btn_stop.config(state="disabled")
-        self._load_summary_preview()
+        if should_refresh:
+            self._load_summary_preview()
+        else:
+            self._load_results_files_status()
 
     def _stop_process(self):
         if messagebox.askyesno("Cancel Pipeline", "Are you sure you want to stop the active command and cancel the pipeline?"):
@@ -858,44 +978,65 @@ class App:
 
     # --- Reports Preview and Path Navigation ---
 
-    def _load_summary_preview(self):
+    def _load_summary_dataframe(self) -> pd.DataFrame:
         run_dir_str = self.run_dir_var.get().strip()
         if not run_dir_str:
-            return
-        
+            return pd.DataFrame()
+            
         run_dir = REPO_ROOT / run_dir_str
-        summary_path = run_dir / "summary.csv"
+        summary_csv = run_dir / "summary.csv"
+        summary_xlsx = run_dir / "summary.xlsx"
+        
+        df = pd.DataFrame()
+        
+        # 1. Try reading summary.csv
+        if summary_csv.exists():
+            try:
+                df = pd.read_csv(summary_csv)
+            except Exception as e:
+                self.log(f"[WARNING] Failed to read summary.csv: {e}\n")
+                
+        # 2. If it is empty or missing suggested_status, check if summary.xlsx has it
+        if df.empty or 'suggested_status' not in df.columns:
+            if summary_xlsx.exists():
+                try:
+                    xlsx_df = pd.read_excel(summary_xlsx, sheet_name="Summary")
+                    if not xlsx_df.empty:
+                        # Prefer the xlsx data as it contains the final exported columns
+                        df = xlsx_df
+                except Exception as e:
+                    self.log(f"[WARNING] Failed to read summary.xlsx: {e}\n")
+                    
+        return df
 
+    def _load_summary_preview(self):
+        df = self._load_summary_dataframe()
+        
         # Clear existing summary columns and items
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.tree["columns"] = []
 
-        if summary_path.exists():
+        if not df.empty:
             try:
-                df = pd.read_csv(summary_path)
-                if not df.empty:
-                    columns = list(df.columns)
-                    self.tree["columns"] = columns
+                columns = list(df.columns)
+                self.tree["columns"] = columns
 
-                    # Bind column headings and set default widths
-                    for col in columns:
-                        self.tree.heading(col, text=col, anchor="w")
-                        self.tree.column(col, width=120, minwidth=70, stretch=True, anchor="w")
+                # Bind column headings and set default widths
+                for col in columns:
+                    self.tree.heading(col, text=col, anchor="w")
+                    self.tree.column(col, width=120, minwidth=70, stretch=True, anchor="w")
 
-                    # Insert data rows
-                    for _, row in df.iterrows():
-                        vals = ["" if pd.isna(val) else str(val) for val in row.values]
-                        self.tree.insert("", "end", values=vals)
-
-                    # Populate metrics dashboard
-                    self._populate_dashboard(df)
+                # Insert data rows
+                for _, row in df.iterrows():
+                    vals = ["" if pd.isna(val) else str(val) for val in row.values]
+                    self.tree.insert("", "end", values=vals)
             except Exception as e:
-                self.log(f"[WARNING] Failed to load summary preview: {e}\n")
-                self._populate_dashboard(pd.DataFrame())
-        else:
-            self._populate_dashboard(pd.DataFrame())
+                self.log(f"[WARNING] Failed to load summary preview table: {e}\n")
 
+        # Populate metrics dashboard
+        self._populate_dashboard(df)
+        
         # Populate issues & review queue tab
         self._load_review_queue_data()
 
@@ -908,7 +1049,13 @@ class App:
             widget.destroy()
 
         if df.empty:
-            ttk.Label(self.dash_frame, text="No grading summary data available.", font=("Segoe UI", 11, "italic")).pack(pady=10)
+            lbl_msg = ttk.Label(
+                self.dash_frame, 
+                text="Export results not generated yet. Run Export Results or Full Pipeline.", 
+                font=("Segoe UI", 11, "italic"),
+                foreground="gray"
+            )
+            lbl_msg.pack(pady=20, anchor="center")
             return
 
         total_subs = len(df)
@@ -930,13 +1077,19 @@ class App:
         c_counts = ttk.LabelFrame(metrics_frame, text=" Global Grading Metrics ", padding=10)
         c_counts.grid(row=0, column=1, sticky="nsew", padx=5)
         
-        he_total = df['hard_error_count'].sum() if 'hard_error_count' in df.columns else "n/a"
-        mr_total = df['manual_review_count'].sum() if 'manual_review_count' in df.columns else "n/a"
-        warn_total = df['warning_count'].sum() if 'warning_count' in df.columns else "n/a"
+        has_final_metrics = ('hard_error_count' in df.columns) and ('manual_review_count' in df.columns)
         
-        ttk.Label(c_counts, text=f"Hard Errors Total: {he_total}", font=("Segoe UI", 10, "bold"), foreground="red" if str(he_total) != "0" else "black").pack(anchor="w")
-        ttk.Label(c_counts, text=f"Manual Reviews Required: {mr_total}", font=("Segoe UI", 10, "bold"), foreground="orange" if str(mr_total) != "0" else "black").pack(anchor="w")
-        ttk.Label(c_counts, text=f"Warnings Total: {warn_total}", foreground="blue" if str(warn_total) != "0" else "gray").pack(anchor="w")
+        if has_final_metrics:
+            he_total = df['hard_error_count'].sum()
+            mr_total = df['manual_review_count'].sum()
+            warn_total = df['warning_count'].sum() if 'warning_count' in df.columns else 0
+            
+            ttk.Label(c_counts, text=f"Hard Errors Total: {he_total}", font=("Segoe UI", 10, "bold"), foreground="red" if he_total > 0 else "black").pack(anchor="w")
+            ttk.Label(c_counts, text=f"Manual Reviews Required: {mr_total}", font=("Segoe UI", 10, "bold"), foreground="orange" if mr_total > 0 else "black").pack(anchor="w")
+            ttk.Label(c_counts, text=f"Warnings Total: {warn_total}", foreground="blue" if warn_total > 0 else "gray").pack(anchor="w")
+        else:
+            lbl_msg = ttk.Label(c_counts, text="Run Export Results first", font=("Segoe UI", 9, "italic"), foreground="gray")
+            lbl_msg.pack(anchor="w", pady=10)
 
         # Card 3: Suggested Status Distribution
         c_status = ttk.LabelFrame(metrics_frame, text=" Status Recommendations ", padding=10)
@@ -956,7 +1109,8 @@ class App:
                     lbl_color = "green"
                 ttk.Label(c_status, text=f"{status}: {count}", foreground=lbl_color, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         else:
-            ttk.Label(c_status, text="[Run 'Export Results' to compute suggested statuses]", font=("Segoe UI", 9, "italic"), foreground="gray").pack(anchor="w")
+            lbl_msg = ttk.Label(c_status, text="Run Export Results first", font=("Segoe UI", 9, "italic"), foreground="gray")
+            lbl_msg.pack(anchor="w", pady=10)
 
         # Detailed breakdown Frame
         breakdown_frame = ttk.LabelFrame(self.dash_frame, text=" Detailed Mappings & Accuracy ", padding=10)
@@ -967,46 +1121,62 @@ class App:
         v_frame = ttk.Frame(breakdown_frame, padding=5)
         v_frame.grid(row=0, column=0, sticky="n")
         ttk.Label(v_frame, text="Views Testing Stats", font=("Segoe UI", 10, "bold", "underline")).pack(anchor="w", pady=(0, 5))
-        v_pass = df['view_pass_count'].sum() if 'view_pass_count' in df.columns else 0
-        v_miss = df['view_missing_count'].sum() if 'view_missing_count' in df.columns else 0
-        v_err = df['view_execution_error_count'].sum() if 'view_execution_error_count' in df.columns else 0
-        ttk.Label(v_frame, text=f"Passing Views: {v_pass}", foreground="green").pack(anchor="w")
-        ttk.Label(v_frame, text=f"Missing Views: {v_miss}", foreground="red" if v_miss > 0 else "gray").pack(anchor="w")
-        ttk.Label(v_frame, text=f"Execution Errors: {v_err}", foreground="red" if v_err > 0 else "gray").pack(anchor="w")
+        
+        if 'view_pass_count' in df.columns:
+            v_pass = df['view_pass_count'].sum()
+            v_miss = df['view_missing_count'].sum() if 'view_missing_count' in df.columns else 0
+            v_err = df['view_execution_error_count'].sum() if 'view_execution_error_count' in df.columns else 0
+            v_mismatch = df['view_value_mismatch_count'].sum() if 'view_value_mismatch_count' in df.columns else 0
+            ttk.Label(v_frame, text=f"Passing Views: {v_pass}", foreground="green").pack(anchor="w")
+            ttk.Label(v_frame, text=f"Missing Views: {v_miss}", foreground="red" if v_miss > 0 else "gray").pack(anchor="w")
+            ttk.Label(v_frame, text=f"Execution Errors: {v_err}", foreground="red" if v_err > 0 else "gray").pack(anchor="w")
+            ttk.Label(v_frame, text=f"Value Mismatches: {v_mismatch}", foreground="red" if v_mismatch > 0 else "gray").pack(anchor="w")
+        else:
+            ttk.Label(v_frame, text="Test Views not run yet", font=("Segoe UI", 9, "italic"), foreground="gray").pack(anchor="w")
 
         # PK Breakdown
         pk_frame = ttk.Frame(breakdown_frame, padding=5)
         pk_frame.grid(row=0, column=1, sticky="n")
         ttk.Label(pk_frame, text="PK Adequacy Stats", font=("Segoe UI", 10, "bold", "underline")).pack(anchor="w", pady=(0, 5))
-        pk_acc = 0
-        for col in ['pk_exact_match_count', 'pk_alias_equivalent_count', 'pk_surrogate_accepted_count', 'pk_natural_accepted_count', 'pk_alternative_accepted_count']:
-            if col in df.columns:
-                pk_acc += df[col].sum()
-        pk_rev = df['pk_review_required_count'].sum() if 'pk_review_required_count' in df.columns else 0
-        pk_miss = 0
-        for col in ['pk_missing_count', 'pk_invalid_count']:
-            if col in df.columns:
-                pk_miss += df[col].sum()
-        ttk.Label(pk_frame, text=f"Accepted PKs: {pk_acc}", foreground="green").pack(anchor="w")
-        ttk.Label(pk_frame, text=f"Review Required: {pk_rev}", foreground="orange" if pk_rev > 0 else "gray").pack(anchor="w")
-        ttk.Label(pk_frame, text=f"Missing/Invalid PKs: {pk_miss}", foreground="red" if pk_miss > 0 else "gray").pack(anchor="w")
+        
+        pk_cols = ['pk_exact_match_count', 'pk_alias_equivalent_count', 'pk_surrogate_accepted_count', 'pk_natural_accepted_count', 'pk_alternative_accepted_count', 'pk_review_required_count', 'pk_missing_count', 'pk_invalid_count']
+        if any(c in df.columns for c in pk_cols):
+            pk_acc = 0
+            for col in ['pk_exact_match_count', 'pk_alias_equivalent_count', 'pk_surrogate_accepted_count', 'pk_natural_accepted_count', 'pk_alternative_accepted_count']:
+                if col in df.columns:
+                    pk_acc += df[col].sum()
+            pk_rev = df['pk_review_required_count'].sum() if 'pk_review_required_count' in df.columns else 0
+            pk_miss = 0
+            for col in ['pk_missing_count', 'pk_invalid_count']:
+                if col in df.columns:
+                    pk_miss += df[col].sum()
+            ttk.Label(pk_frame, text=f"Accepted PKs: {pk_acc}", foreground="green").pack(anchor="w")
+            ttk.Label(pk_frame, text=f"Review Required: {pk_rev}", foreground="orange" if pk_rev > 0 else "gray").pack(anchor="w")
+            ttk.Label(pk_frame, text=f"Missing/Invalid PKs: {pk_miss}", foreground="red" if pk_miss > 0 else "gray").pack(anchor="w")
+        else:
+            ttk.Label(pk_frame, text="Structure compare not run yet", font=("Segoe UI", 9, "italic"), foreground="gray").pack(anchor="w")
 
         # FK Breakdown
         fk_frame = ttk.Frame(breakdown_frame, padding=5)
         fk_frame.grid(row=0, column=2, sticky="n")
         ttk.Label(fk_frame, text="FK Relationships Stats", font=("Segoe UI", 10, "bold", "underline")).pack(anchor="w", pady=(0, 5))
-        fk_acc = 0
-        for col in ['fk_exact_match_count', 'fk_relationship_match_count', 'fk_alias_equivalent_count', 'fk_surrogate_accepted_count', 'fk_natural_accepted_count']:
-            if col in df.columns:
-                fk_acc += df[col].sum()
-        fk_rev = df['fk_review_required_count'].sum() if 'fk_review_required_count' in df.columns else 0
-        fk_miss = 0
-        for col in ['fk_missing_count', 'fk_wrong_target_count']:
-            if col in df.columns:
-                fk_miss += df[col].sum()
-        ttk.Label(fk_frame, text=f"Accepted FKs: {fk_acc}", foreground="green").pack(anchor="w")
-        ttk.Label(fk_frame, text=f"Review Required: {fk_rev}", foreground="orange" if fk_rev > 0 else "gray").pack(anchor="w")
-        ttk.Label(fk_frame, text=f"Missing/Wrong FKs: {fk_miss}", foreground="red" if fk_miss > 0 else "gray").pack(anchor="w")
+        
+        fk_cols = ['fk_exact_match_count', 'fk_relationship_match_count', 'fk_alias_equivalent_count', 'fk_surrogate_accepted_count', 'fk_natural_accepted_count', 'fk_review_required_count', 'fk_missing_count', 'fk_wrong_target_count']
+        if any(c in df.columns for c in fk_cols):
+            fk_acc = 0
+            for col in ['fk_exact_match_count', 'fk_relationship_match_count', 'fk_alias_equivalent_count', 'fk_surrogate_accepted_count', 'fk_natural_accepted_count']:
+                if col in df.columns:
+                    fk_acc += df[col].sum()
+            fk_rev = df['fk_review_required_count'].sum() if 'fk_review_required_count' in df.columns else 0
+            fk_miss = 0
+            for col in ['fk_missing_count', 'fk_wrong_target_count']:
+                if col in df.columns:
+                    fk_miss += df[col].sum()
+            ttk.Label(fk_frame, text=f"Accepted FKs: {fk_acc}", foreground="green").pack(anchor="w")
+            ttk.Label(fk_frame, text=f"Review Required: {fk_rev}", foreground="orange" if fk_rev > 0 else "gray").pack(anchor="w")
+            ttk.Label(fk_frame, text=f"Missing/Wrong FKs: {fk_miss}", foreground="red" if fk_miss > 0 else "gray").pack(anchor="w")
+        else:
+            ttk.Label(fk_frame, text="Structure compare not run yet", font=("Segoe UI", 9, "italic"), foreground="gray").pack(anchor="w")
 
     def _read_combined_issues(self, run_dir: Path) -> List[Dict[str, Any]]:
         items = []
@@ -1048,6 +1218,11 @@ class App:
             return
             
         filter_val = self.rq_filter_var.get()
+        sub_id_filter = self.rq_sub_id_var.get().strip().lower()
+        report_filter = self.rq_report_var.get().strip().lower()
+        component_filter = self.rq_component_var.get().strip().lower()
+        status_filter = self.rq_status_var.get().strip().lower()
+        severity_filter = self.rq_severity_var.get().strip().lower()
         
         filtered = []
         for row in items:
@@ -1055,7 +1230,10 @@ class App:
             comp = row.get("component", "")
             status = row.get("status", "")
             src_rep = row.get("source_report", "")
+            sub_id = row.get("submission_id", "")
+            severity = row.get("severity", "")
             
+            # Category filters
             if filter_val == "Hard Errors Only" and cat != "Hard Error":
                 continue
             elif filter_val == "Review Required Only" and cat != "Review Required":
@@ -1067,12 +1245,25 @@ class App:
             elif filter_val == "Mapping Issues Only" and not ("mapping" in src_rep.lower() or "ambiguous" in status.lower() or "unmapped" in status.lower() or status == "EXTRA_REVIEW"):
                 continue
                 
+            # Entry filters (case insensitive substring matches)
+            if sub_id_filter and sub_id_filter not in sub_id.lower():
+                continue
+            if report_filter and report_filter not in src_rep.lower():
+                continue
+            if component_filter and component_filter not in comp.lower():
+                continue
+            if status_filter and status_filter not in status.lower():
+                continue
+            if severity_filter and severity_filter not in severity.lower():
+                continue
+                
             filtered.append(row)
             
         for row in filtered:
             vals = [
                 row.get("submission_id", ""),
                 row.get("category", ""),
+                row.get("source_report", ""),
                 row.get("component", ""),
                 row.get("status", ""),
                 row.get("severity", ""),
@@ -1093,7 +1284,6 @@ class App:
         run_dir = REPO_ROOT / run_dir_str
         
         for lbl_status, btn_open, subpath in self.file_widgets:
-            # Resolve path dynamically
             if not subpath:
                 path = run_dir
             else:

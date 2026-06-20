@@ -5,7 +5,8 @@ from dbcheck.gui.app import (
     validate_inputs,
     build_snapshot_command,
     build_compare_structure_command,
-    build_test_views_command
+    build_test_views_command,
+    build_export_results_command
 )
 
 def test_check_run_dir_nesting():
@@ -161,3 +162,44 @@ def test_build_commands():
     # Test Views with optional answer backup
     view_cmd_bak = build_test_views_command(run, td, cfg, ans)
     assert view_cmd_bak[view_cmd_bak.index("--answer-bak") + 1] == str(Path(ans))
+
+
+def test_gui_additional_command_construction():
+    ans = "solution/dapan.bak"
+    subs = "exams"
+    run = "runs/run_test"
+    cfg = "configs/assignment.yaml"
+    td = "test_data"
+
+    # 1. compare_existing_data execution mode does not include --test-data
+    view_cmd_exist = build_test_views_command(
+        run_dir=run,
+        test_data=td,
+        config=cfg,
+        answer_bak=ans,
+        execution_mode="compare_existing_data"
+    )
+    assert "--test-data" not in view_cmd_exist
+    assert view_cmd_exist[view_cmd_exist.index("--answer-bak") + 1] == str(Path(ans))
+
+    # 2. compare_seeded_test_data execution mode includes --test-data
+    view_cmd_seeded = build_test_views_command(
+        run_dir=run,
+        test_data=td,
+        config=cfg,
+        answer_bak=ans,
+        execution_mode="compare_seeded_test_data"
+    )
+    assert "--test-data" in view_cmd_seeded
+    assert view_cmd_seeded[view_cmd_seeded.index("--test-data") + 1] == str(Path(td))
+
+    # 3. Full pipeline queue order is snapshot -> compare-structure -> test-views -> export-results
+    snap = build_snapshot_command(ans, subs, run, cfg)
+    comp = build_compare_structure_command(run, cfg)
+    views = build_test_views_command(run, td, cfg, ans, "compare_existing_data")
+    export = build_export_results_command(run, cfg)
+
+    assert snap[2] == "snapshot"
+    assert comp[2] == "compare-structure"
+    assert views[2] == "test-views"
+    assert export[2] == "export-results"

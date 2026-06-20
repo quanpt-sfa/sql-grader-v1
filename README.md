@@ -76,3 +76,35 @@ A final suggested status is resolved for each submission based on prioritized ru
 - `review_queue.xlsx` / `review_queue.csv`: Filterable list of items requiring manual verification.
 - `hard_errors.csv`: Critical failures.
 - `student_feedback/<submission_id>.md`: Detailed student-facing markdown reports.
+
+---
+
+## GUI App & Pipeline Semantics
+
+### 1. Launching the GUI
+To run the interactive grader GUI:
+```powershell
+$env:PYTHONPATH="src"; python src/dbcheck/gui/app.py
+```
+
+### 2. Full Pipeline Workflow
+When you click **Run Full Pipeline**, the GUI executes exactly this 4-step sequence:
+1. **snapshot**: Restore and snapshot answer and student backups.
+2. **compare-structure**: Match tables, columns, PKs, and FKs.
+3. **test-views**: Query student views and compare outputs with answer views.
+4. **export-results**: Aggregate and compile final spreadsheet reports.
+
+The pipeline runs in a background thread to keep the GUI responsive. It will only halt on command-level failure (e.g., database connection issues or Python crash), not on per-submission grading errors.
+
+### 3. Metric Dashboard & Report Refreshing
+- **Metrics Dashboard & Reloading**: Centralized metrics (Suggested Status distribution, Manual Review counts, Hard Errors) are only computed and made available after `export-results` has completed successfully.
+- **Premature N/A Protection**: Before the export-results stage completes, the dashboard shows `"Export results not generated yet. Run Export Results or Full Pipeline."` to prevent premature display of incomplete data.
+- **Refresh Results**: You can click the **Refresh Results** button to reload the spreadsheet outputs (`summary.csv`, `review_queue.csv`, `hard_errors.csv`) manually from disk without running any commands.
+
+### 4. Status Fields Explained
+- **manifest_status**: Indicates whether the student's database backup was successfully restored and snapshotted. Statuses are `OK` or `ERROR`.
+- **suggested_status**: The final grading recommendation resolved after structure and view behavioral testing (e.g., `PASS`, `NEEDS_REVIEW`, `FAIL_STRUCTURE`, `FAIL_VIEW`).
+
+### 5. Output Paths
+All compiled files (`summary.xlsx`, `summary.csv`, `review_queue.xlsx`, `review_queue.csv`, `hard_errors.csv`, and `execution.log`) are written directly to the active Run Directory (e.g., `runs/run_<timestamp>/`). Student feedback reports are located in `runs/run_<timestamp>/student_feedback/`.
+
