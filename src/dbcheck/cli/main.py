@@ -30,6 +30,12 @@ def main():
     view_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
     view_parser.add_argument("--answer-bak", help="Optional path to answer database backup file (.bak)")
 
+    # Command: export-results
+    export_parser = subparsers.add_parser("export-results", help="Export aggregated grading results")
+    export_parser.add_argument("--run-dir", required=True, help="Runs directory containing submissions")
+    export_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
+    export_parser.add_argument("--format", default="xlsx", choices=["xlsx", "csv"], help="Output format (default: xlsx)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -53,6 +59,9 @@ def main():
         elif args.command == "test-views":
             from dbcheck.cli.test_views import run_test_views
             run_test_views(args)
+        elif args.command == "export-results":
+            from dbcheck.cli.export_results import run_export_results
+            run_export_results(args)
         logger.info(f"Successfully completed command: {args.command}")
     except Exception as e:
         logger.exception(f"Command '{args.command}' failed with error: {e}")

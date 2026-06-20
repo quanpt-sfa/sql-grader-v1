@@ -1,0 +1,6 @@
+pyodbc
+pandas
+pyyaml
+rapidfuzz
+python-dotenv
+openpyxl
