@@ -727,7 +727,11 @@ class App:
                 
             self.current_config_execution_mode = config.execution_mode
             
-            if config.execution_mode == "compare_existing_data":
+            if config.execution_mode == "compare_rewritten_sql_on_answer_db":
+                self.test_data_entry.config(state="disabled")
+                self.btn_browse_test_data.config(state="disabled")
+                self.lbl_config_note.config(text="Student view SQL is rewritten using table/column mappings and executed on the answer database. View names are not used for grading.")
+            elif config.execution_mode == "compare_existing_data":
                 self.test_data_entry.config(state="disabled")
                 self.btn_browse_test_data.config(state="disabled")
                 self.lbl_config_note.config(text="View testing compares existing restored .bak data; no seeding.")

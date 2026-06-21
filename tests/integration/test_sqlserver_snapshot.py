@@ -68,7 +68,7 @@ def test_sqlserver_introspection():
         assert "BanHang" in table_canons
         
         view_canons = [v["view_name_canonical"] for v in views]
-        assert "Cau1" in view_canons or "cau1" in [vc.lower() for vc in view_canons]
+        assert any("cau1" in vc.lower() for vc in view_canons)
         
         with tempfile.TemporaryDirectory() as tmp_dir:
             snap_path = Path(tmp_dir)

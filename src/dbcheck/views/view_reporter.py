@@ -30,21 +30,32 @@ from dbcheck.views.value_normalizer import normalize_dataframe, compare_ordered
 from dbcheck.views.result_comparator import compare_multisets
 from dbcheck.structure.type_compatibility import get_type_group
 from dbcheck.utils.logging import get_logger
+from dbcheck.views.sql_rewriter import extract_select_body, rewrite_sql_query
+from dbcheck.snapshot.normalizer import normalize_key
 
 REPORT_HEADERS = [
     "submission_id",
     "answer_view",
     "student_view",
+    "matched_student_view",
+    "match_method",
     "status",
     "matched_columns",
     "missing_columns",
     "extra_columns",
     "row_count_answer",
     "row_count_student",
+    "schema_score",
+    "row_count_score",
+    "value_score",
+    "order_score",
+    "total_match_score",
     "answer_minus_student_count",
     "student_minus_answer_count",
     "value_mismatch_count",
+    "order_mismatch_count",
     "execution_error",
+    "reason",
 ]
 
 
@@ -392,6 +403,518 @@ def _build_result(
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def extract_student_views(db_conn: Any, stud_db: str, submission_id: str) -> List[Dict[str, Any]]:
+    logger = get_logger()
+    sql = """
+    SELECT 
+        v.name AS view_name,
+        COALESCE(m.definition, OBJECT_DEFINITION(v.object_id)) AS definition
+    FROM sys.views v
+    LEFT JOIN sys.sql_modules m ON v.object_id = m.object_id
+    WHERE v.is_ms_shipped = 0
+    """
+    results = []
+    try:
+        rows = db_conn.execute_query(sql, db_name=stud_db)
+        for r in rows:
+            view_name = r["view_name"]
+            definition = r["definition"]
+            if definition:
+                results.append({
+                    "submission_id": submission_id,
+                    "student_view_name": view_name,
+                    "definition_found": True,
+                    "raw_definition": definition,
+                    "extract_status": "VIEW_SQL_EXTRACTED",
+                    "extract_error": ""
+                })
+            else:
+                results.append({
+                    "submission_id": submission_id,
+                    "student_view_name": view_name,
+                    "definition_found": False,
+                    "raw_definition": "",
+                    "extract_status": "VIEW_SQL_DEFINITION_MISSING",
+                    "extract_error": ""
+                })
+    except Exception as e:
+        logger.error(f"Error extracting student views for {submission_id}: {e}")
+        try:
+            simple_rows = db_conn.execute_query("SELECT name FROM sys.views WHERE is_ms_shipped = 0", db_name=stud_db)
+            for r in simple_rows:
+                view_name = r["name"]
+                results.append({
+                    "submission_id": submission_id,
+                    "student_view_name": view_name,
+                    "definition_found": False,
+                    "raw_definition": "",
+                    "extract_status": "VIEW_SQL_EXTRACTION_ERROR",
+                    "extract_error": str(e)
+                })
+        except Exception as e2:
+            logger.error(f"Fallback view name extraction failed: {e2}")
+            
+    return results
+
+
+def run_compare_rewritten_sql_on_answer_db(
+    db_conn: Any,
+    ans_db: str,
+    stud_db: str,
+    submission_id: str,
+    config: AssignmentConfig,
+    expected_views: List[ViewConfig],
+    output_report_path: Path,
+    diff_dir: Path,
+    col_accept_threshold: float,
+    export_outputs: bool
+) -> List[Dict[str, Any]]:
+    logger = get_logger()
+    output_report_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 1. Extract student views DDL
+    extracted_views = extract_student_views(db_conn, stud_db, submission_id)
+    
+    # Write view_sql_extraction_report.csv
+    extract_report_path = output_report_path.parent / "view_sql_extraction_report.csv"
+    with open(extract_report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "student_view_name", "definition_found", 
+            "raw_definition", "extract_status", "extract_error"
+        ])
+        writer.writeheader()
+        for ev in extracted_views:
+            writer.writerow(ev)
+            
+    # 2. Load accepted mapping reports
+    table_map = {}
+    column_map = {}
+    
+    table_report_path = output_report_path.parent / "table_mapping_report.csv"
+    if table_report_path.exists():
+        try:
+            with open(table_report_path, "r", encoding="utf-8") as f:
+                good_table_statuses = {
+                    "TABLE_MATCHED_EXACT", "TABLE_MATCHED_ALIAS",
+                    "TABLE_MATCHED_ABBREVIATION", "TABLE_MATCHED_FUZZY_HIGH"
+                }
+                if config.sql_rewrite.allow_weak_table_aliases:
+                    good_table_statuses.add("TABLE_MATCHED_WEAK_ALIAS")
+                for row in csv.DictReader(f):
+                    if row["match_status"] in good_table_statuses:
+                        table_map[row["student_table"]] = row["answer_table"]
+        except Exception as e:
+            logger.warning(f"Failed to read table mapping report: {e}")
+            
+    col_report_path = output_report_path.parent / "column_mapping_report.csv"
+    if col_report_path.exists():
+        try:
+            with open(col_report_path, "r", encoding="utf-8") as f:
+                good_col_statuses = {
+                    "COLUMN_MATCHED_EXACT", "COLUMN_MATCHED_ALIAS",
+                    "COLUMN_MATCHED_ABBREVIATION"
+                }
+                if config.sql_rewrite.allow_weak_column_aliases:
+                    good_col_statuses.add("COLUMN_MATCHED_WEAK_ALIAS")
+                for row in csv.DictReader(f):
+                    if row["match_status"] in good_col_statuses:
+                        column_map[(row["student_table"], row["student_column"])] = row["answer_column"]
+        except Exception as e:
+            logger.warning(f"Failed to read column mapping report: {e}")
+            
+    # 3. Rewrite each safe candidate
+    rewritten_candidates = []
+    
+    for ev in extracted_views:
+        student_view_name = ev["student_view_name"]
+        if not ev["definition_found"]:
+            rewritten_candidates.append({
+                "submission_id": submission_id,
+                "student_view_name": student_view_name,
+                "raw_sql_available": False,
+                "parse_status": "VIEW_SQL_PARSE_ERROR",
+                "rewrite_status": "VIEW_SQL_REWRITE_PARSE_ERROR",
+                "safety_status": "VIEW_SQL_UNSAFE_REVIEW",
+                "table_mappings_used": "",
+                "column_mappings_used": "",
+                "unmapped_tables": "",
+                "unmapped_columns": "",
+                "ambiguous_columns": "",
+                "raw_select_sql": "",
+                "rewritten_sql": "",
+                "execution_status": "NOT_EXECUTED",
+                "execution_error": ev["extract_error"] or "View definition missing."
+            })
+            continue
+            
+        raw_definition = ev["raw_definition"]
+        try:
+            raw_select_sql = extract_select_body(raw_definition)
+            parse_status = "VIEW_SQL_PARSE_SUCCESS"
+        except Exception as e:
+            raw_select_sql = ""
+            parse_status = "VIEW_SQL_PARSE_ERROR"
+            
+        if parse_status == "VIEW_SQL_PARSE_ERROR":
+            rewritten_candidates.append({
+                "submission_id": submission_id,
+                "student_view_name": student_view_name,
+                "raw_sql_available": True,
+                "parse_status": "VIEW_SQL_PARSE_ERROR",
+                "rewrite_status": "VIEW_SQL_REWRITE_PARSE_ERROR",
+                "safety_status": "VIEW_SQL_UNSAFE_REVIEW",
+                "table_mappings_used": "",
+                "column_mappings_used": "",
+                "unmapped_tables": "",
+                "unmapped_columns": "",
+                "ambiguous_columns": "",
+                "raw_select_sql": "",
+                "rewritten_sql": "",
+                "execution_status": "NOT_EXECUTED",
+                "execution_error": "Could not parse DDL to extract SELECT statement query body."
+            })
+            continue
+            
+        # Rewrite query
+        rw_res = rewrite_sql_query(raw_select_sql, table_map, column_map, config)
+        
+        rewritten_candidates.append({
+            "submission_id": submission_id,
+            "student_view_name": student_view_name,
+            "raw_sql_available": True,
+            "parse_status": "VIEW_SQL_PARSE_SUCCESS",
+            "rewrite_status": rw_res["status"],
+            "safety_status": "VIEW_SQL_UNSAFE_REVIEW" if rw_res["status"] == "VIEW_SQL_UNSAFE_REVIEW" else "VIEW_SQL_SAFE",
+            "table_mappings_used": rw_res.get("table_mappings_used", []),
+            "column_mappings_used": rw_res.get("column_mappings_used", []),
+            "unmapped_tables": rw_res.get("unmapped_tables", []),
+            "unmapped_columns": rw_res.get("unmapped_columns", []),
+            "ambiguous_columns": rw_res.get("ambiguous_columns", []),
+            "raw_select_sql": raw_select_sql,
+            "rewritten_sql": rw_res.get("rewritten_sql", ""),
+            "execution_status": "NOT_EXECUTED",
+            "execution_error": rw_res.get("error_message", "")
+        })
+        
+    # 4. Cache the expected answer outputs from answer database
+    expected_outputs = {}
+    expected_errors = {}
+    
+    for view_cfg in expected_views:
+        ans_v_name = view_cfg.answer_view
+        try:
+            ans_df = db_conn.execute_query_df(f"SELECT * FROM dbo.[{ans_v_name}]", db_name=ans_db)
+            expected_outputs[ans_v_name] = ans_df
+        except Exception as e:
+            logger.error(f"Failed to execute expected view '{ans_v_name}' on answer database: {e}")
+            expected_errors[ans_v_name] = str(e)
+            
+    # 5. Execute rewritten candidates on answer database and compare
+    all_matches = []
+    
+    for rc in rewritten_candidates:
+        if rc["rewrite_status"] == "VIEW_SQL_REWRITE_SUCCESS" and rc["safety_status"] == "VIEW_SQL_SAFE":
+            rewritten_sql = rc["rewritten_sql"]
+            try:
+                stud_df = db_conn.execute_query_df(rewritten_sql, db_name=ans_db)
+                rc["execution_status"] = "EXECUTION_SUCCESS"
+                
+                if export_outputs:
+                    raw_out_path = output_report_path.parent.parent / "view_outputs" / "student" / f"{rc['student_view_name']}_rewritten.csv"
+                    _export_raw_csv(stud_df, raw_out_path)
+            except Exception as e:
+                stud_df = None
+                rc["execution_status"] = "EXECUTION_ERROR"
+                rc["execution_error"] = str(e)
+        else:
+            stud_df = None
+            
+        # Compare this candidate against all expected views
+        for view_cfg in expected_views:
+            ans_v_name = view_cfg.answer_view
+            ans_df = expected_outputs.get(ans_v_name)
+            
+            schema_score = 0.0
+            row_count_score = 0.0
+            value_score = 0.0
+            order_score = 0.0
+            total_match_score = 0.0
+            
+            val_mismatch = 0
+            ord_mismatch = 0
+            matched_cols = []
+            missing_cols = []
+            extra_cols = []
+            
+            cand_status = "VIEW_NO_MATCHING_OUTPUT"
+            reason = ""
+            
+            if ans_df is None:
+                cand_status = "VIEW_EXECUTION_ERROR"
+                reason = f"Answer view execution error: {expected_errors.get(ans_v_name)}"
+            elif rc["rewrite_status"] == "VIEW_SQL_REWRITE_PARSE_ERROR":
+                cand_status = "VIEW_SQL_PARSE_ERROR"
+                reason = f"DDL extraction wrapper parsing failed: {rc['execution_error']}"
+            elif rc["rewrite_status"] != "VIEW_SQL_REWRITE_SUCCESS":
+                cand_status = rc["rewrite_status"]
+                reason = f"Rewrite failed: {rc['execution_error']}"
+            elif rc["safety_status"] != "VIEW_SQL_SAFE":
+                cand_status = "VIEW_SQL_UNSAFE_REVIEW"
+                reason = f"Safety violation: {rc['execution_error']}"
+            elif rc["execution_status"] != "EXECUTION_SUCCESS":
+                cand_status = "VIEW_EXECUTION_ERROR"
+                reason = f"Execution error on answer DB: {rc['execution_error']}"
+            else:
+                try:
+                    ans_canon = canonicalize_view_output(ans_df, view_cfg, {}, col_accept_threshold)
+                    stud_canon = canonicalize_view_output(stud_df, view_cfg, {}, col_accept_threshold)
+                    
+                    expected_canonicals = [c["canonical"] for c in view_cfg.columns]
+                    phys_cols = list(stud_df.columns) if stud_df is not None else []
+                    
+                    try:
+                        col_mapping = resolve_view_columns(phys_cols, view_cfg, {}, col_accept_threshold)
+                        for _p, canon in col_mapping.items():
+                            matched_cols.append(canon)
+                        for c in expected_canonicals:
+                            if c not in matched_cols:
+                                missing_cols.append(c)
+                        for p in phys_cols:
+                            if p not in col_mapping:
+                                extra_cols.append(p)
+                    except ValueError:
+                        pass
+                        
+                    if len(expected_canonicals) > 0:
+                        schema_score = len(matched_cols) / len(expected_canonicals)
+                    else:
+                        schema_score = 1.0
+                        
+                    R_a = len(ans_canon)
+                    R_s = len(stud_canon)
+                    row_count_score = max(0.0, 1.0 - abs(R_a - R_s) / max(R_a, 1))
+                    
+                    if view_cfg.order_sensitive:
+                        metrics_ord, diff_df = compare_ordered(ans_canon, stud_canon, view_cfg)
+                        val_mismatch = metrics_ord["value_mismatch_count"]
+                        value_score = max(0.0, 1.0 - val_mismatch / max(R_a, 1))
+                        order_score = 1.0 if val_mismatch == 0 else 0.0
+                    else:
+                        ans_minus, stud_minus, ms_metrics = compare_multisets(ans_canon, stud_canon)
+                        val_mismatch = ms_metrics["value_mismatch_count"]
+                        value_score = max(0.0, 1.0 - val_mismatch / max(R_a, 1))
+                        order_score = 0.0
+                        
+                    if view_cfg.order_sensitive:
+                        total_match_score = 0.2 * schema_score + 0.2 * row_count_score + 0.5 * value_score + 0.1 * order_score
+                    else:
+                        total_match_score = (2/9) * schema_score + (2/9) * row_count_score + (5/9) * value_score
+                        
+                    if missing_cols or extra_cols:
+                        cand_status = "VIEW_OUTPUT_SCHEMA_MISMATCH"
+                        reason = f"Schema mismatch: missing={missing_cols}, extra={extra_cols}"
+                    elif row_count_score < 1.0:
+                        cand_status = "VIEW_ROW_COUNT_MISMATCH"
+                        reason = f"Row count mismatch: expected={R_a}, student={R_s}"
+                    elif view_cfg.order_sensitive and order_score < 1.0:
+                        cand_status = "VIEW_ORDER_MISMATCH"
+                        reason = "Row order does not match expectation."
+                    elif value_score < 1.0:
+                        cand_status = "VIEW_VALUE_MISMATCH"
+                        reason = f"Value mismatch: {val_mismatch} row(s)"
+                    else:
+                        cand_status = "VIEW_OUTPUT_MATCH"
+                        reason = "Output matches expected answer."
+                        
+                except Exception as ex:
+                    cand_status = "VIEW_EXECUTION_ERROR"
+                    reason = f"Comparison failed: {ex}"
+                    
+            hint_score = 1.0 if normalize_key(rc["student_view_name"]) == normalize_key(ans_v_name) else 0.0
+            
+            all_matches.append({
+                "submission_id": submission_id,
+                "expected_view": ans_v_name,
+                "student_view_candidate": rc["student_view_name"],
+                "student_view_name_hint_score": hint_score,
+                "parse_status": rc["parse_status"],
+                "rewrite_status": rc["rewrite_status"],
+                "safety_status": rc["safety_status"],
+                "execution_status": rc["execution_status"],
+                "schema_score": schema_score,
+                "row_count_score": row_count_score,
+                "value_score": value_score,
+                "order_score": order_score,
+                "total_match_score": total_match_score,
+                "candidate_status": cand_status,
+                "reason": reason,
+                "matched_columns": ";".join(matched_cols),
+                "missing_columns": ";".join(missing_cols),
+                "extra_columns": ";".join(extra_cols),
+                "row_count_answer": len(ans_df) if ans_df is not None else 0,
+                "row_count_student": len(stud_df) if stud_df is not None else 0,
+                "value_mismatch_count": val_mismatch,
+                "order_mismatch_count": ord_mismatch,
+                "execution_error": rc["execution_error"]
+            })
+            
+    # Save view_sql_rewrite_report.csv
+    rewrite_report_path = output_report_path.parent / "view_sql_rewrite_report.csv"
+    with open(rewrite_report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "student_view_name", "raw_sql_available", "parse_status",
+            "rewrite_status", "safety_status", "table_mappings_used", "column_mappings_used",
+            "unmapped_tables", "unmapped_columns", "ambiguous_columns", "raw_select_sql",
+            "rewritten_sql", "execution_status", "execution_error"
+        ])
+        writer.writeheader()
+        for rc in rewritten_candidates:
+            # Format mappings used as string lists
+            rc_out = {**rc}
+            rc_out["table_mappings_used"] = ";".join(rc["table_mappings_used"]) if isinstance(rc["table_mappings_used"], list) else rc["table_mappings_used"]
+            rc_out["column_mappings_used"] = ";".join(rc["column_mappings_used"]) if isinstance(rc["column_mappings_used"], list) else rc["column_mappings_used"]
+            rc_out["unmapped_tables"] = ";".join(rc["unmapped_tables"]) if isinstance(rc["unmapped_tables"], list) else rc["unmapped_tables"]
+            rc_out["unmapped_columns"] = ";".join(rc["unmapped_columns"]) if isinstance(rc["unmapped_columns"], list) else rc["unmapped_columns"]
+            rc_out["ambiguous_columns"] = ";".join(rc["ambiguous_columns"]) if isinstance(rc["ambiguous_columns"], list) else rc["ambiguous_columns"]
+            writer.writerow(rc_out)
+            
+    # Save view_candidate_match_report.csv
+    match_report_path = output_report_path.parent / "view_candidate_match_report.csv"
+    with open(match_report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "expected_view", "student_view_candidate", 
+            "student_view_name_hint_score", "parse_status", "rewrite_status",
+            "safety_status", "execution_status", "schema_score", "row_count_score",
+            "value_score", "order_score", "total_match_score", "candidate_status", "reason"
+        ])
+        writer.writeheader()
+        for match in all_matches:
+            writer.writerow({k: match.get(k, "") for k in [
+                "submission_id", "expected_view", "student_view_candidate", 
+                "student_view_name_hint_score", "parse_status", "rewrite_status",
+                "safety_status", "execution_status", "schema_score", "row_count_score",
+                "value_score", "order_score", "total_match_score", "candidate_status", "reason"
+            ]})
+            
+    # 6. One-to-one candidate assignment
+    sorted_matches = sorted(all_matches, key=lambda x: (x["total_match_score"], x["student_view_name_hint_score"]), reverse=True)
+    
+    assigned_student_views = set()
+    assigned_expected_views = set()
+    final_assignments = {}
+    
+    for match in sorted_matches:
+        e_view = match["expected_view"]
+        s_view = match["student_view_candidate"]
+        
+        if e_view not in assigned_expected_views and s_view not in assigned_student_views:
+            final_assignments[e_view] = match
+            assigned_student_views.add(s_view)
+            assigned_expected_views.add(e_view)
+            
+    final_results = []
+    
+    for view_cfg in expected_views:
+        ans_v_name = view_cfg.answer_view
+        
+        if ans_v_name in final_assignments:
+            match = final_assignments[ans_v_name]
+            score = match["total_match_score"]
+            s_view = match["student_view_candidate"]
+            
+            # Check for ambiguity: find second best candidate for this expected view
+            other_candidates = [m for m in all_matches if m["expected_view"] == ans_v_name and m["student_view_candidate"] != s_view]
+            other_candidates.sort(key=lambda x: (x["total_match_score"], x["student_view_name_hint_score"]), reverse=True)
+            
+            status = match["candidate_status"]
+            reason = match["reason"]
+            match_method = "output_based"
+            
+            if other_candidates:
+                second_best = other_candidates[0]
+                if abs(score - second_best["total_match_score"]) < 0.02 and score > 0.0:
+                    status = "VIEW_MAPPING_AMBIGUOUS"
+                    reason = f"Ambiguous match: multiple views ({s_view}, {second_best['student_view_candidate']}) score nearly identical ({score:.4f} vs {second_best['total_match_score']:.4f})."
+                    match_method = "no_matching_output"
+            
+            if match["student_view_name_hint_score"] == 1.0 and match_method == "output_based":
+                match_method = "name_hint_then_output"
+                
+            final_results.append({
+                "submission_id": submission_id,
+                "answer_view": ans_v_name,
+                "matched_student_view": s_view,
+                "match_method": match_method,
+                "status": status,
+                "row_count_answer": match["row_count_answer"],
+                "row_count_student": match["row_count_student"],
+                "schema_score": match["schema_score"],
+                "row_count_score": match["row_count_score"],
+                "value_score": match["value_score"],
+                "order_score": match["order_score"],
+                "total_match_score": match["total_match_score"],
+                "value_mismatch_count": match["value_mismatch_count"],
+                "order_mismatch_count": match["order_mismatch_count"],
+                "execution_error": match["execution_error"],
+                "reason": reason,
+                "matched_columns": match["matched_columns"],
+                "missing_columns": match["missing_columns"],
+                "extra_columns": match["extra_columns"]
+            })
+        else:
+            cands_for_e = [m for m in all_matches if m["expected_view"] == ans_v_name]
+            cands_for_e.sort(key=lambda x: (x["total_match_score"], x["student_view_name_hint_score"]), reverse=True)
+            
+            status = "VIEW_NO_MATCHING_OUTPUT"
+            reason = "No matching student view output found."
+            match_method = "no_matching_output"
+            s_view_name = ""
+            
+            if cands_for_e:
+                best_cand = cands_for_e[0]
+                if best_cand["total_match_score"] >= 0.5:
+                    status = "VIEW_MAPPING_AMBIGUOUS"
+                    reason = f"Ambiguous match: student view '{best_cand['student_view_candidate']}' was the best candidate for expected view '{ans_v_name}' (score {best_cand['total_match_score']:.4f}) but was assigned to another expected view."
+                    s_view_name = best_cand["student_view_candidate"]
+                    
+            final_results.append({
+                "submission_id": submission_id,
+                "answer_view": ans_v_name,
+                "matched_student_view": s_view_name,
+                "match_method": match_method,
+                "status": status,
+                "row_count_answer": 0,
+                "row_count_student": 0,
+                "schema_score": 0.0,
+                "row_count_score": 0.0,
+                "value_score": 0.0,
+                "order_score": 0.0,
+                "total_match_score": 0.0,
+                "value_mismatch_count": 0,
+                "order_mismatch_count": 0,
+                "execution_error": "",
+                "reason": reason,
+                "matched_columns": "",
+                "missing_columns": "",
+                "extra_columns": ""
+            })
+            
+    output_report_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=REPORT_HEADERS)
+        writer.writeheader()
+        for r in final_results:
+            writer.writerow({k: r.get(k, "") for k in REPORT_HEADERS})
+            
+    # Export answer raw output if enabled and hasn't failed
+    if export_outputs:
+        for ans_v_name, ans_df in expected_outputs.items():
+            ans_out_path = output_report_path.parent.parent / "view_outputs" / "answer" / f"{ans_v_name}.csv"
+            _export_raw_csv(ans_df, ans_out_path)
+            
+    return final_results
+
+
 def run_view_testing(
     db_conn: Any,
     ans_db: str,
@@ -420,6 +943,13 @@ def run_view_testing(
     expected_views = _resolve_expected_views(
         config, ans_views_snap, ans_view_cols_snap or []
     )
+
+    if execution_mode == "compare_rewritten_sql_on_answer_db":
+        return run_compare_rewritten_sql_on_answer_db(
+            db_conn, ans_db, stud_db, submission_id, config,
+            expected_views, output_report_path, diff_dir,
+            col_accept_threshold, export_outputs
+        )
 
     # Build student view lookup: canonical → [physical_name, ...]
     stud_view_map: Dict[str, List[str]] = {}

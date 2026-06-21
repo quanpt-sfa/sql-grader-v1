@@ -12,7 +12,8 @@ REVIEW_STATUSES = {
     "TYPE_WARNING", "IDENTIFIER_TYPE_WARNING", "COLUMN_UNMAPPED_STUDENT",
     "EXTRA_REVIEW", "SURROGATE_KEY_REVIEW", "VIEW_TEST_NOT_RUN",
     "TABLE_REVIEW_REQUIRED", "COLUMN_MATCHED_WEAK_ALIAS", "DUPLICATE_MAPPING_REVIEW",
-    "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED", "FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR"
+    "FK_RELATIONSHIP_IMPLIED_REVIEW_REQUIRED", "FK_RELATIONSHIP_AMBIGUOUS", "FK_RELATIONSHIP_MAPPING_ERROR",
+    "VIEW_OUTPUT_PARTIAL_MATCH", "VIEW_SQL_UNSAFE_REVIEW", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN"
 }
 
 HARD_ERROR_STATUSES = {
@@ -20,7 +21,8 @@ HARD_ERROR_STATUSES = {
     "VIEW_NOT_FOUND", "VIEW_EXECUTION_ERROR", "VIEW_VALUE_MISMATCH",
     "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH",
     "FK_RELATIONSHIP_MISSING", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
-    "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS"
+    "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
+    "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
 }
 
 def get_suggested_action(status: str, component: str) -> str:
@@ -48,6 +50,20 @@ def get_suggested_action(status: str, component: str) -> str:
         return "Correct the data selection or join conditions in the view query."
     elif status == "VIEW_ROW_COUNT_MISMATCH":
         return "Verify the filter conditions or joins in the view query."
+    elif status == "VIEW_OUTPUT_PARTIAL_MATCH":
+        return "Adjust view SELECT logic to correct output value/row count differences."
+    elif status == "VIEW_SQL_UNSAFE_REVIEW":
+        return "Manually inspect the view query logic for any safety or SQL validation issues."
+    elif status == "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN":
+        return "Ensure view query columns are clearly alias-qualified when resolving tables."
+    elif status == "VIEW_NO_MATCHING_OUTPUT":
+        return "Correct student query logic so that execution yields output matching answer data."
+    elif status == "VIEW_SQL_PARSE_ERROR":
+        return "Correct the view syntax or CREATE/ALTER VIEW wrapper definition."
+    elif status == "VIEW_SQL_REWRITE_UNMAPPED_TABLE":
+        return "Verify that table mappings exist for all table references in the view."
+    elif status == "VIEW_SQL_REWRITE_UNMAPPED_COLUMN":
+        return "Verify that column mappings exist for all column references in the view."
     elif status == "ROW_COUNT_MISMATCH":
         return "Ensure the student database was restored and seeded with correct data."
     elif status == "PK_REVIEW_REQUIRED":

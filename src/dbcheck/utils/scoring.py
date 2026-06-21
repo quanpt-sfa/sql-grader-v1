@@ -14,14 +14,15 @@ PASS_STATUSES = {
     "PK_MATCH_EXACT", "PK_MATCH_ALIAS_EQUIVALENT", "PK_SURROGATE_ACCEPTED", "PK_NATURAL_ACCEPTED",
     "FK_MATCH_EXACT", "FK_ALIAS_EQUIVALENT", "FK_SURROGATE_ACCEPTED", "FK_NATURAL_ACCEPTED",
     "FK_RELATIONSHIP_MATCH", "FK_RELATIONSHIP_MATCH_ALIAS_EQUIVALENT", "FK_RELATIONSHIP_SURROGATE_ACCEPTED", "FK_RELATIONSHIP_NATURAL_ACCEPTED",
-    "VIEW_PASS", "PASS"
+    "VIEW_PASS", "VIEW_OUTPUT_MATCH", "PASS"
 }
 
 FAIL_STATUSES = {
     "MISSING", "COLUMN_MISSING_ANSWER", "PK_MISSING", "PK_INVALID", "FK_MISSING", "FK_WRONG_TARGET",
     "FK_RELATIONSHIP_MISSING", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
     "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
-    "VIEW_NOT_FOUND", "VIEW_EXECUTION_ERROR", "VIEW_VALUE_MISMATCH", "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH"
+    "VIEW_NOT_FOUND", "VIEW_EXECUTION_ERROR", "VIEW_VALUE_MISMATCH", "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH",
+    "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_ORDER_MISMATCH"
 }
 
 REVIEW_STATUSES = {
@@ -30,7 +31,8 @@ REVIEW_STATUSES = {
     "MAPPING_AMBIGUOUS", "VIEW_MAPPING_AMBIGUOUS", "VIEW_OUTPUT_SCHEMA_MISMATCH",
     "TYPE_WARNING", "IDENTIFIER_TYPE_WARNING", "COLUMN_UNMAPPED_STUDENT",
     "EXTRA_REVIEW", "DUPLICATE_MAPPING_REVIEW", "SURROGATE_KEY_REVIEW",
-    "TABLE_REVIEW_REQUIRED", "COLUMN_MATCHED_WEAK_ALIAS"
+    "TABLE_REVIEW_REQUIRED", "COLUMN_MATCHED_WEAK_ALIAS",
+    "VIEW_OUTPUT_PARTIAL_MATCH", "VIEW_SQL_UNSAFE_REVIEW", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN"
 }
 
 def load_rubric(rubric_path: Path) -> List[Dict[str, Any]]:
@@ -477,10 +479,13 @@ def score_submission(
                 if v_status in inc_statuses:
                     orig_points = total_pts
                     msg = "View passed fully"
-                elif v_status == "VIEW_NOT_FOUND" or v_status == "VIEW_EXECUTION_ERROR":
+                elif v_status in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT", "VIEW_EXECUTION_ERROR",
+                                  "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE",
+                                  "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN",
+                                  "VIEW_SQL_UNSAFE_REVIEW", "VIEW_MAPPING_AMBIGUOUS"):
                     # If view is missing or fails, subchecks receive zero
                     orig_points = 0.0
-                    msg = f"View execution failed or not found: {v_status}"
+                    msg = f"View execution failed, rewrite error, unsafe, or not found: {v_status}"
                 elif policy == "partial_view":
                     # Subchecks evaluated independently
                     # Check if view is order sensitive
@@ -499,11 +504,11 @@ def score_submission(
                     val_mismatch = int(view_res.get("value_mismatch_count", 0))
                     
                     subchecks = {
-                        "exists": v_status != "VIEW_NOT_FOUND",
-                        "schema": (v_status != "VIEW_NOT_FOUND") and (not missing_cols) and (v_status != "VIEW_OUTPUT_SCHEMA_MISMATCH"),
-                        "row_count": (v_status != "VIEW_NOT_FOUND") and (row_count_ans == row_count_stud) and (v_status not in ("VIEW_ROW_COUNT_MISMATCH", "VIEW_EXECUTION_ERROR")),
-                        "value_match": (v_status != "VIEW_NOT_FOUND") and (val_mismatch == 0) and (v_status not in ("VIEW_VALUE_MISMATCH", "VIEW_EXECUTION_ERROR")),
-                        "order_match": (v_status != "VIEW_NOT_FOUND") and (v_status == "VIEW_PASS" or (v_status != "VIEW_ORDER_MISMATCH" and v_status != "VIEW_EXECUTION_ERROR"))
+                        "exists": v_status not in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT"),
+                        "schema": (v_status not in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT")) and (not missing_cols) and (v_status != "VIEW_OUTPUT_SCHEMA_MISMATCH"),
+                        "row_count": (v_status not in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT")) and (row_count_ans == row_count_stud) and (v_status not in ("VIEW_ROW_COUNT_MISMATCH", "VIEW_EXECUTION_ERROR")),
+                        "value_match": (v_status not in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT")) and (val_mismatch == 0) and (v_status not in ("VIEW_VALUE_MISMATCH", "VIEW_EXECUTION_ERROR")),
+                        "order_match": (v_status not in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT")) and (v_status in ("VIEW_PASS", "VIEW_OUTPUT_MATCH") or (v_status != "VIEW_ORDER_MISMATCH" and v_status != "VIEW_EXECUTION_ERROR"))
                     }
                     
                     weighted_score = 0.0

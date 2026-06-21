@@ -60,14 +60,21 @@ SUMMARY_HEADERS: List[str] = [
     "fk_relationship_error_count",
     # View metrics
     "view_required_count",
+    "view_expected_count",
     "view_pass_count",
+    "view_output_match_count",
+    "view_partial_match_count",
+    "view_no_matching_output_count",
     "view_missing_count",
     "view_ambiguous_count",
     "view_execution_error_count",
+    "view_rewrite_error_count",
     "view_output_schema_mismatch_count",
+    "view_schema_mismatch_count",
     "view_value_mismatch_count",
     "view_row_count_mismatch_count",
     "view_order_mismatch_count",
+    "view_review_required_count",
     # Global view command status
     "view_test_status",
 ]
@@ -82,9 +89,6 @@ _VIEW_STATUS_MAP = {
     "VIEW_EXECUTION_ERROR": "view_execution_error_count",
     "DATA_SEED_ERROR": "view_execution_error_count",
     "VIEW_OUTPUT_SCHEMA_MISMATCH": "view_output_schema_mismatch_count",
-    "VIEW_VALUE_MISMATCH": "view_value_mismatch_count",
-    "VIEW_ROW_COUNT_MISMATCH": "view_row_count_mismatch_count",
-    "VIEW_ORDER_MISMATCH": "view_order_mismatch_count",
     # Legacy statuses from old seeded mode — map to closest equivalent
     "PASS": "view_pass_count",
     "VALUE_MISMATCH": "view_value_mismatch_count",
@@ -299,8 +303,11 @@ def compile_summary(run_dir: Path) -> Path:
                 with open(view_report, "r", encoding="utf-8") as vf:
                     for v_row in csv.DictReader(vf):
                         row["view_required_count"] += 1
+                        row["view_expected_count"] += 1
                         v_status = v_row["status"].upper()
                         statuses.append(v_status)
+                        
+                        # Legacy column mapping
                         dest = _VIEW_STATUS_MAP.get(v_status)
                         if dest:
                             row[dest] += 1
@@ -308,7 +315,29 @@ def compile_summary(run_dir: Path) -> Path:
                             row["view_ambiguous_count"] += 1
                         elif "ERROR" in v_status:
                             row["view_execution_error_count"] += 1
-                non_pass = [s for s in statuses if s not in ("VIEW_PASS", "PASS")]
+                            
+                        # New column mapping
+                        if v_status in ("VIEW_OUTPUT_MATCH", "VIEW_PASS", "PASS"):
+                            row["view_output_match_count"] += 1
+                        elif v_status == "VIEW_OUTPUT_PARTIAL_MATCH":
+                            row["view_partial_match_count"] += 1
+                        elif v_status in ("VIEW_NO_MATCHING_OUTPUT", "VIEW_NOT_FOUND", "VIEW_NO_STUDENT_VIEWS"):
+                            row["view_no_matching_output_count"] += 1
+                        elif v_status in ("VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN"):
+                            row["view_rewrite_error_count"] += 1
+                        elif v_status in ("VIEW_SQL_UNSAFE_REVIEW", "VIEW_MAPPING_AMBIGUOUS", "VIEW_OUTPUT_SCHEMA_MISMATCH"):
+                            row["view_review_required_count"] += 1
+                            
+                        if v_status == "VIEW_OUTPUT_SCHEMA_MISMATCH":
+                            row["view_schema_mismatch_count"] += 1
+                        elif v_status == "VIEW_ROW_COUNT_MISMATCH":
+                            row["view_row_count_mismatch_count"] += 1
+                        elif v_status == "VIEW_VALUE_MISMATCH":
+                            row["view_value_mismatch_count"] += 1
+                        elif v_status == "VIEW_ORDER_MISMATCH":
+                            row["view_order_mismatch_count"] += 1
+                            
+                non_pass = [s for s in statuses if s not in ("VIEW_PASS", "PASS", "VIEW_OUTPUT_MATCH")]
                 if non_pass:
                     if any("ERROR" in s for s in non_pass):
                         row["view_test_status"] = "ERROR"

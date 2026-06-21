@@ -28,7 +28,7 @@ def test_view_behavior_end_to_end():
             "aliases": {
                 "tables": {
                     "NhanVien": ["Employee", "NhanVien"],
-                    "KhachHang": ["Customer", "KH", "NhaCungCap", "NCC"],
+                    "KhachHang": ["Customer", "KH", "NhaCungCap", "NCC", "04. NCC", "04.NCC"],
                     "Hang": ["Product", "HangHoa", "HTK", "HangTonKho"],
                     "Tien": ["Currency", "LoaiTien"],
                     "BanHang": ["Sales", "MuaHang", "Muahangg"],
@@ -37,8 +37,8 @@ def test_view_behavior_end_to_end():
                     "ChiTietThuTien": ["ReceiptDetail", "ChiTietTraTien", "CT_ChiTien"]
                 },
                 "columns": {
-                    "MaKH": ["CustomerID", "MaKhachHang", "MaNhaCungCap"],
-                    "TenKH": ["CustomerName", "TenKhachHang", "TenNhaCungCap"],
+                    "MaKH": ["CustomerID", "MaKhachHang", "MaNhaCungCap", "MaNCC"],
+                    "TenKH": ["CustomerName", "TenKhachHang", "TenNhaCungCap", "TenNCC"],
                     "MaNV": ["EmployeeID", "MaNhanVien"],
                     "TenNV": ["EmployeeName", "TenNhanVien"],
                     "MaHang": ["ProductID", "MaHangHoa"],
@@ -52,19 +52,24 @@ def test_view_behavior_end_to_end():
                 }
             }
         },
-        "views": [
-            {
-                "answer_view": "Cau1",
-                "expected_output": {
-                    "columns": [
-                        {"canonical": "MaKH", "type": "text", "aliases": ["MaNhaCungCap"]},
-                        {"canonical": "TenKH", "type": "text", "aliases": ["TenNhaCungCap"]}
-                    ],
-                    "sort_by": ["MaKH"],
-                    "numeric_tolerance": 0.01
+        "views": {
+            "mode": "explicit_config",
+            "execution_mode": "compare_rewritten_sql_on_answer_db",
+            "export_outputs": True,
+            "expected": [
+                {
+                    "answer_view": "vw_Cau1_NhaCungCap_ThuDuc_Den20240630",
+                    "expected_output": {
+                        "columns": [
+                            {"canonical": "MaKH", "type": "text", "aliases": ["MaNhaCungCap"]},
+                            {"canonical": "TenKH", "type": "text", "aliases": ["TenNhaCungCap"]}
+                        ],
+                        "sort_by": ["MaKH"],
+                        "numeric_tolerance": 0.01
+                    }
                 }
-            }
-        ]
+            ]
+        }
     }
     config = AssignmentConfig(config_data)
     normalizer = NameNormalizer(config)
@@ -98,7 +103,7 @@ def test_view_behavior_end_to_end():
             test_data_path = Path(tmp_dir)
             
             # Parent tables
-            pd.DataFrame({"MaKH": [1, 2], "TenKH": ["An", "Binh"]}).to_csv(test_data_path / "KhachHang.csv", index=False)
+            pd.DataFrame({"MaKH": [1, 2], "TenKH": ["An", "Binh"], "KhuVuc": ["KV1", "KV1"]}).to_csv(test_data_path / "KhachHang.csv", index=False)
             pd.DataFrame({"MaNV": [1], "TenNV": ["Emp One"]}).to_csv(test_data_path / "NhanVien.csv", index=False)
             pd.DataFrame({"MaHang": [1], "TenHang": ["Item One"]}).to_csv(test_data_path / "Hang.csv", index=False)
             pd.DataFrame({"MaTien": [1], "TenTien": ["Vietnamese Dong"]}).to_csv(test_data_path / "Tien.csv", index=False)
@@ -133,8 +138,8 @@ def test_view_behavior_end_to_end():
             )
             
             assert len(view_results) == 1
-            # Status should be VIEW_NOT_FOUND because student backup has no views
-            assert view_results[0]["status"] == "VIEW_NOT_FOUND"
+            # Status should be VIEW_NO_MATCHING_OUTPUT because student backup has no views
+            assert view_results[0]["status"] == "VIEW_NO_MATCHING_OUTPUT"
             
     finally:
         # Drop temporary databases

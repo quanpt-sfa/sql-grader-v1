@@ -130,6 +130,19 @@ class SchemaConfig:
         return _normalize_table_name_for_exclusion(table_name) in self._excluded_normalized
 
 
+class SqlRewriteConfig:
+    def __init__(self, data: Dict[str, Any]):
+        if not data:
+            data = {}
+        self.enabled: bool = bool(data.get("enabled", True))
+        self.use_existing_mapping_reports: bool = bool(data.get("use_existing_mapping_reports", True))
+        self.reject_unsafe_sql: bool = bool(data.get("reject_unsafe_sql", True))
+        self.execute_on_answer_db: bool = bool(data.get("execute_on_answer_db", True))
+        self.allow_weak_column_aliases: bool = bool(data.get("allow_weak_column_aliases", False))
+        self.allow_weak_table_aliases: bool = bool(data.get("allow_weak_table_aliases", False))
+        self.max_execution_seconds: int = int(data.get("max_execution_seconds", 10))
+
+
 class AssignmentConfig:
     def __init__(self, data: Dict[str, Any]):
         assignment = data.get("assignment", {})
@@ -150,6 +163,7 @@ class AssignmentConfig:
         self.compare_as_multiset: bool = True  # row-order-insensitive by default
 
         views_list: List[Dict[str, Any]] = []
+        sql_rewrite_data = {}
         if isinstance(views_data, list):
             # Backward compat: bare list → explicit_config + seeded mode
             self.views_mode = "explicit_config"
@@ -161,8 +175,10 @@ class AssignmentConfig:
             self.export_outputs = bool(views_data.get("export_outputs", True))
             self.compare_as_multiset = bool(views_data.get("compare_as_multiset", True))
             views_list = views_data.get("expected", []) or []
+            sql_rewrite_data = views_data.get("sql_rewrite", {}) or {}
 
         self.views: List[ViewConfig] = [ViewConfig(v) for v in views_list]
+        self.sql_rewrite = SqlRewriteConfig(sql_rewrite_data)
 
         # type_compatibility lives under schema: in YAML; fall back to top-level for compat
         tc_data = schema_data.get("type_compatibility") or data.get("type_compatibility") or {}

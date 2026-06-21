@@ -268,6 +268,16 @@ def run_test_views(args):
             answer_bak_path = convention_bak
             logger.info(f"Using convention answer backup: {answer_bak_path}")
 
+    if execution_mode == "compare_rewritten_sql_on_answer_db":
+        if not answer_bak_path or not answer_bak_path.exists():
+            try:
+                db_conn.execute_query("SELECT 1", db_name=protected_db)
+            except Exception:
+                raise ValueError(
+                    "--answer-bak is required in compare_rewritten_sql_on_answer_db mode "
+                    f"unless the protected answer database '{protected_db}' is available."
+                )
+
     # 8. Read full answer snapshot
     ans_snap = read_full_snapshot(answer_snapshot_dir)
     normalizer = NameNormalizer(config)

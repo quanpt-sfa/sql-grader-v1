@@ -188,13 +188,16 @@ def canonicalize_view_output(
             df[canon_name] = normalized
 
             
-    # 3. Sort rows deterministically
-    sort_cols = view_config.sort_by if view_config.sort_by else expected_names
-    # Sort columns that are present in the dataframe
-    sort_cols_present = [c for c in sort_cols if c in df.columns]
-    
-    if sort_cols_present:
-        # Sort and reset index. We use na_position='last' to be consistent
-        df = df.sort_values(by=sort_cols_present, na_position="last").reset_index(drop=True)
+    # 3. Sort rows deterministically (only if not order-sensitive)
+    if not view_config.order_sensitive:
+        sort_cols = view_config.sort_by if view_config.sort_by else expected_names
+        # Sort columns that are present in the dataframe
+        sort_cols_present = [c for c in sort_cols if c in df.columns]
+        
+        if sort_cols_present:
+            # Sort and reset index. We use na_position='last' to be consistent
+            df = df.sort_values(by=sort_cols_present, na_position="last").reset_index(drop=True)
+    else:
+        df = df.reset_index(drop=True)
         
     return df
