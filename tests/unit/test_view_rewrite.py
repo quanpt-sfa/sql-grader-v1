@@ -277,6 +277,92 @@ def test_cte_query_rewriting(base_config_data):
     # The CTE reference 'MyCTE' is NOT rewritten as a physical table
     assert "dbo.MyCTE" not in res["rewritten_sql"]
 
+
+def test_bracketed_numbered_table_qualifier_rewrites_from_mapping_report(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"04.NCC": "NhaCungCap"}
+    column_map = {
+        ("04.NCC", "TenNCC"): "TenNhaCungCap",
+        ("NhaCungCap", "TenNCC"): "TenNhaCungCap",
+    }
+
+    res = rewrite_sql_query(
+        "SELECT [04.NCC].TenNCC FROM [04.NCC]",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "04.NCC" not in res["unmapped_columns"]
+    assert "TenNhaCungCap" in res["rewritten_sql"]
+    assert "NhaCungCap" in res["rewritten_sql"]
+
+
+def test_schema_qualified_numbered_table_does_not_treat_dbo_as_column(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"04.NCC": "NhaCungCap"}
+    column_map = {("04.NCC", "TenNCC"): "TenNhaCungCap"}
+
+    res = rewrite_sql_query(
+        "SELECT dbo.[04.NCC].TenNCC FROM dbo.[04.NCC]",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "dbo" not in res["unmapped_columns"]
+    assert "TenNhaCungCap" in res["rewritten_sql"]
+
+
+def test_bracketed_vietnamese_column_rewrites_under_numbered_table(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"06.CT_MuaHang": "ChiTietMuaHang"}
+    column_map = {("06.CT_MuaHang", "Số lượng"): "SoLuong"}
+
+    res = rewrite_sql_query(
+        "SELECT [06.CT_MuaHang].[Số lượng] FROM [06.CT_MuaHang]",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "SoLuong" in res["rewritten_sql"]
+
+
+def test_top_percent_keyword_not_unmapped_column(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"04.NCC": "NhaCungCap"}
+    column_map = {("04.NCC", "TenNCC"): "TenNhaCungCap"}
+
+    res = rewrite_sql_query(
+        "SELECT TOP (100) PERCENT [04.NCC].TenNCC FROM [04.NCC]",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "PERCENT" not in res["unmapped_columns"]
+
+
+def test_unqualified_column_rewrites_when_unique_in_scope(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"04.NCC": "NhaCungCap"}
+    column_map = {("04.NCC", "TenNCC"): "TenNhaCungCap"}
+
+    res = rewrite_sql_query(
+        "SELECT TenNCC FROM [04.NCC]",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "TenNhaCungCap" in res["rewritten_sql"]
+
 def test_order_sensitivity(base_config_data, tmp_path):
     # Set expected view to order_sensitive=True
     base_config_data["views"]["expected"][0]["order_sensitive"] = True
@@ -638,6 +724,6 @@ def test_unmapped_column_details_in_rewrite_report(base_config_data, tmp_path):
     with open(tmp_path / "view_sql_rewrite_report.csv", "r", encoding="utf-8") as f:
         rows = list(csv_module.DictReader(f))
     assert rows[0]["rewrite_status"] == "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
-    assert rows[0]["unmapped_columns"] == "UnknownCol"
+    assert rows[0]["unmapped_columns"] == "c.UnknownCol"
     assert rows[0]["raw_select_sql_path"]
     assert rows[0]["rewritten_sql_path"]

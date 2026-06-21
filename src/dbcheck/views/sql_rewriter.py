@@ -94,8 +94,78 @@ RESERVED_KEYWORDS = {
     "SELECT", "FROM", "JOIN", "ON", "WHERE", "GROUP", "ORDER", "HAVING", "UNION",
     "INTERSECT", "EXCEPT", "WITH", "AS", "INNER", "LEFT", "RIGHT", "FULL", "CROSS",
     "OUTER", "APPLY", "AND", "OR", "NOT", "BY", "TOP", "DISTINCT", "AS", "NULL",
-    "CASE", "WHEN", "THEN", "ELSE", "END", "LIKE", "IN", "BETWEEN", "EXISTS", "IS"
+    "CASE", "WHEN", "THEN", "ELSE", "END", "LIKE", "IN", "BETWEEN", "EXISTS", "IS",
+    "PERCENT", "OFFSET", "FETCH", "NEXT", "ROWS", "ONLY"
 }
+
+def _context_keys(name: Optional[str]) -> Set[str]:
+    if not name:
+        return set()
+    clean = clean_identifier(str(name))
+    keys = {clean.lower(), normalize_key(clean)}
+    if "." in clean:
+        keys.add(clean.split(".")[-1].lower())
+        keys.add(normalize_key(clean.split(".")[-1]))
+    return {k for k in keys if k}
+
+def _register_alias_context(alias_context: Dict[str, Dict[str, Any]], name: Optional[str], meta: Dict[str, Any]) -> None:
+    for key in _context_keys(name):
+        alias_context[key] = meta
+
+def _lookup_alias_context(alias_context: Dict[str, Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+    for key in _context_keys(name):
+        if key in alias_context:
+            return alias_context[key]
+    return None
+
+def _lookup_table_mapping(table_map: Dict[str, str], physical_table: str) -> Optional[str]:
+    phys_norm = normalize_key(physical_table)
+    for student_table, answer_table in table_map.items():
+        if normalize_key(student_table) == phys_norm:
+            return answer_table
+    return None
+
+def _resolve_column_mapping(
+    column_map: Dict[Tuple[str, str], str],
+    table_map: Dict[str, str],
+    canonical_table: Optional[str],
+    physical_table: Optional[str],
+    column_name: str,
+) -> Optional[str]:
+    col_norm = normalize_key(column_name)
+    table_norms = set()
+    if physical_table:
+        table_norms.add(normalize_key(physical_table))
+    if canonical_table:
+        table_norms.add(normalize_key(canonical_table))
+
+    for student_table, answer_table in table_map.items():
+        if canonical_table and normalize_key(answer_table) == normalize_key(canonical_table):
+            table_norms.add(normalize_key(student_table))
+
+    for (student_table, student_column), answer_column in column_map.items():
+        if normalize_key(student_column) == col_norm and normalize_key(student_table) in table_norms:
+            return answer_column
+    return None
+
+def _candidate_column_mappings(
+    column_map: Dict[Tuple[str, str], str],
+    table_map: Dict[str, str],
+    in_scope_physical_tables: List[Tuple[str, str]],
+    column_name: str,
+) -> List[Tuple[str, str]]:
+    candidates = []
+    seen = set()
+    for physical_table, canonical_table in in_scope_physical_tables:
+        answer_column = _resolve_column_mapping(
+            column_map, table_map, canonical_table, physical_table, column_name
+        )
+        if answer_column:
+            key = (canonical_table, answer_column)
+            if key not in seen:
+                seen.add(key)
+                candidates.append(key)
+    return candidates
 
 def sql_safety_audit(tokens: List[Token]) -> Optional[str]:
     """
@@ -497,36 +567,32 @@ def rewrite_sql_query(
     # Build alias context and tables mappings
     alias_context = {}  # alias_lower -> {physical_name, canonical_name, is_cte}
     in_scope_physical_tables = []
+    original_physical_contexts = []
     
     for src in table_sources:
         if src["is_subquery"]:
             alias = src["alias"]
             if alias:
-                alias_context[alias.lower()] = {
+                _register_alias_context(alias_context, alias, {
                     "physical_name": None,
                     "canonical_name": None,
                     "is_cte": True, # treat as CTE for column lookup fallback
                     "is_subquery": True
-                }
+                })
         elif src["is_cte"]:
             alias = src["alias"] or src["physical_name"]
-            alias_context[alias.lower()] = {
+            _register_alias_context(alias_context, alias, {
                 "physical_name": src["physical_name"],
                 "canonical_name": src["physical_name"],
                 "is_cte": True,
                 "is_subquery": False
-            }
+            })
         else:
             # Physical table
             phys_t = src["physical_name"]
-            phys_t_norm = normalize_key(phys_t)
             
             # Map physical to canonical
-            canon_t = None
-            for p_t, c_t in table_map.items():
-                if normalize_key(p_t) == phys_t_norm:
-                    canon_t = c_t
-                    break
+            canon_t = _lookup_table_mapping(table_map, phys_t)
                     
             if not canon_t:
                 result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_TABLE"
@@ -537,12 +603,16 @@ def rewrite_sql_query(
             in_scope_physical_tables.append((phys_t, canon_t))
             
             alias = src["alias"] or phys_t
-            alias_context[alias.lower()] = {
+            meta = {
                 "physical_name": phys_t,
                 "canonical_name": canon_t,
                 "is_cte": False,
                 "is_subquery": False
             }
+            original_physical_contexts.append((src, meta))
+            raw_qualified_name = ".".join(src.get("raw_parts", []))
+            for qualifier in (alias, phys_t, canon_t, raw_qualified_name, f"dbo.{phys_t}", f"dbo.[{phys_t}]"):
+                _register_alias_context(alias_context, qualifier, meta)
             
     # Gather tokens that must NOT be rewritten as columns (table names & aliases in FROM/JOIN)
     table_join_indices = set()
@@ -563,7 +633,7 @@ def rewrite_sql_query(
     
     for src in table_sources_to_rewrite:
         start, end = src["token_range"]
-        canon_t = alias_context[(src["alias"] or src["physical_name"]).lower()]["canonical_name"]
+        canon_t = _lookup_alias_context(alias_context, src["alias"] or src["physical_name"])["canonical_name"]
         
         # Replace the table name tokens with "dbo.[CanonicalTable]"
         use_brackets = any('[' in tokens[idx].value for idx in range(start, end + 1))
@@ -592,25 +662,33 @@ def rewrite_sql_query(
     # Re-build alias context and in_scope_physical_tables
     alias_context = {}
     in_scope_physical_tables = []
+    for original_src, meta in original_physical_contexts:
+        phys_t = meta["physical_name"]
+        canon_t = meta["canonical_name"]
+        alias = original_src["alias"] or phys_t
+        raw_qualified_name = ".".join(original_src.get("raw_parts", []))
+        in_scope_physical_tables.append((phys_t, canon_t))
+        for qualifier in (alias, phys_t, canon_t, raw_qualified_name, f"dbo.{phys_t}", f"dbo.[{phys_t}]"):
+            _register_alias_context(alias_context, qualifier, meta)
     
     for src in table_sources:
         if src["is_subquery"]:
             alias = src["alias"]
             if alias:
-                alias_context[alias.lower()] = {
+                _register_alias_context(alias_context, alias, {
                     "physical_name": None,
                     "canonical_name": None,
                     "is_cte": True,
                     "is_subquery": True
-                }
+                })
         elif src["is_cte"]:
             alias = src["alias"] or src["physical_name"]
-            alias_context[alias.lower()] = {
+            _register_alias_context(alias_context, alias, {
                 "physical_name": src["physical_name"],
                 "canonical_name": src["physical_name"],
                 "is_cte": True,
                 "is_subquery": False
-            }
+            })
         else:
             # Already rewritten to dbo.CanonTable or dbo.[CanonTable]
             # Core name is after dbo.
@@ -626,14 +704,15 @@ def rewrite_sql_query(
             if not student_t:
                 student_t = canon_t
                 
-            in_scope_physical_tables.append((student_t, canon_t))
             alias = src["alias"] or full_name
-            alias_context[alias.lower()] = {
+            meta = {
                 "physical_name": student_t,
                 "canonical_name": canon_t,
                 "is_cte": False,
                 "is_subquery": False
             }
+            for qualifier in (alias, full_name, canon_t, f"dbo.{canon_t}", f"dbo.[{canon_t}]"):
+                _register_alias_context(alias_context, qualifier, meta)
             
     # 7. Identify and rewrite columns
     replacements = {}
@@ -643,17 +722,20 @@ def rewrite_sql_query(
     i = 0
     n = len(tokens)
     while i < n - 2:
+        if i in table_join_indices or i in output_alias_indices:
+            i += 1
+            continue
         t1 = tokens[i]
         t2 = tokens[i+1]
         t3 = tokens[i+2]
         
         if t1.type in ("WORD", "IDENTIFIER_BRACKET", "IDENTIFIER_QUOTE") and t2.type == "SYMBOL" and t2.value == "." and t3.type in ("WORD", "IDENTIFIER_BRACKET", "IDENTIFIER_QUOTE"):
             alias_val = clean_identifier(t1.value)
-            if alias_val.lower() in alias_context:
+            alias_meta = _lookup_alias_context(alias_context, alias_val)
+            if alias_meta:
                 # Standard alias.column
                 qualified_indices.update([i, i+1, i+2])
                 
-                alias_meta = alias_context[alias_val.lower()]
                 col_name = clean_identifier(t3.value)
                 col_name_norm = normalize_key(col_name)
                 
@@ -689,14 +771,13 @@ def rewrite_sql_query(
                 else:
                     # Physical table
                     phys_t = alias_meta["physical_name"]
-                    for (st_t, st_c), ans_c in column_map.items():
-                        if normalize_key(st_t) == normalize_key(phys_t) and normalize_key(st_c) == col_name_norm:
-                            resolved_col = ans_c
-                            break
+                    resolved_col = _resolve_column_mapping(
+                        column_map, table_map, alias_meta.get("canonical_name"), phys_t, col_name
+                    )
                             
                 if not resolved_col:
                     result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
-                    result["unmapped_columns"].append(col_name)
+                    result["unmapped_columns"].append(f"{alias_val}.{col_name}")
                     return result
                     
                 result["column_mappings_used"].append(f"{alias_val}.{col_name}->{resolved_col}")
@@ -719,23 +800,19 @@ def rewrite_sql_query(
                 t5 = tokens[i+4]
                 if t4.type == "SYMBOL" and t4.value == "." and t5.type in ("WORD", "IDENTIFIER_BRACKET", "IDENTIFIER_QUOTE"):
                     table_val = clean_identifier(t3.value)
-                    if table_val.lower() in alias_context:
+                    alias_meta = _lookup_alias_context(alias_context, table_val)
+                    if alias_meta:
                         qualified_indices.update([i, i+1, i+2, i+3, i+4])
-                        alias_meta = alias_context[table_val.lower()]
                         col_name = clean_identifier(t5.value)
-                        col_name_norm = normalize_key(col_name)
                         
-                        resolved_col = None
                         phys_t = alias_meta["physical_name"]
-                        if phys_t:
-                            for (st_t, st_c), ans_c in column_map.items():
-                                if normalize_key(st_t) == normalize_key(phys_t) and normalize_key(st_c) == col_name_norm:
-                                    resolved_col = ans_c
-                                    break
+                        resolved_col = _resolve_column_mapping(
+                            column_map, table_map, alias_meta.get("canonical_name"), phys_t, col_name
+                        )
                                     
                         if not resolved_col:
                             result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
-                            result["unmapped_columns"].append(col_name)
+                            result["unmapped_columns"].append(f"dbo.{table_val}.{col_name}")
                             return result
                             
                         result["column_mappings_used"].append(f"dbo.{table_val}.{col_name}->{resolved_col}")
@@ -748,6 +825,15 @@ def rewrite_sql_query(
                         
                         i += 5
                         continue
+                    qualified_indices.update([i, i+1, i+2])
+                    result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_TABLE"
+                    result["unmapped_tables"].append(f"dbo.{table_val}")
+                    return result
+            else:
+                qualified_indices.update([i, i+1, i+2])
+                result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_TABLE"
+                result["unmapped_tables"].append(alias_val)
+                return result
                         
         i += 1
         
@@ -779,18 +865,13 @@ def rewrite_sql_query(
                 continue
                 
             # It's an unqualified column reference!
-            col_name_norm = normalize_key(val)
-            candidates = []
-            
-            for s_t, c_t in in_scope_physical_tables:
-                for (st_t, st_c), ans_c in column_map.items():
-                    if normalize_key(st_t) == normalize_key(s_t) and normalize_key(st_c) == col_name_norm:
-                        if (s_t, ans_c) not in candidates:
-                            candidates.append((s_t, ans_c))
+            candidates = _candidate_column_mappings(
+                column_map, table_map, in_scope_physical_tables, val
+            )
                             
             if len(candidates) == 1:
                 resolved_col = candidates[0][1]
-                result["column_mappings_used"].append(f"{val}->{resolved_col}")
+                result["column_mappings_used"].append(f"{candidates[0][0]}.{val}->{resolved_col}")
                 use_brackets = '[' in t.value
                 replacements[idx] = f"[{resolved_col}]" if use_brackets else resolved_col
             elif len(candidates) > 1:
@@ -798,26 +879,10 @@ def rewrite_sql_query(
                 result["ambiguous_columns"].append(val)
                 return result
             else:
-                # Check global column map fallback if no match in physical tables
-                global_cands = []
-                for (st_t, st_c), ans_c in column_map.items():
-                    if normalize_key(st_c) == col_name_norm:
-                        if ans_c not in global_cands:
-                            global_cands.append(ans_c)
-                if len(global_cands) == 1:
-                    resolved_col = global_cands[0]
-                    result["column_mappings_used"].append(f"{val}->{resolved_col}")
-                    use_brackets = '[' in t.value
-                    replacements[idx] = f"[{resolved_col}]" if use_brackets else resolved_col
-                elif len(global_cands) > 1:
-                    result["status"] = "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN"
-                    result["ambiguous_columns"].append(val)
-                    return result
-                else:
-                    # Unmapped column
-                    result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
-                    result["unmapped_columns"].append(val)
-                    return result
+                # Unmapped column
+                result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
+                result["unmapped_columns"].append(val)
+                return result
                     
     # Apply replacements
     for idx, new_val in replacements.items():

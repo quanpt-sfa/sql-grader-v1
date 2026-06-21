@@ -651,7 +651,10 @@ def run_compare_rewritten_sql_on_answer_db(
                     good_table_statuses.add("TABLE_MATCHED_WEAK_ALIAS")
                 for row in csv.DictReader(f):
                     if row["match_status"] in good_table_statuses:
-                        table_map[row["student_table"]] = row["answer_table"]
+                        student_table = row["student_table"]
+                        answer_table = row["answer_table"]
+                        table_map[student_table] = answer_table
+                        table_map[answer_table] = answer_table
         except Exception as e:
             logger.warning(f"Failed to read table mapping report: {e}")
             
@@ -667,7 +670,13 @@ def run_compare_rewritten_sql_on_answer_db(
                     good_col_statuses.add("COLUMN_MATCHED_WEAK_ALIAS")
                 for row in csv.DictReader(f):
                     if row["match_status"] in good_col_statuses:
-                        column_map[(row["student_table"], row["student_column"])] = row["answer_column"]
+                        student_table = row["student_table"]
+                        student_column = row["student_column"]
+                        answer_table = table_map.get(student_table, row.get("answer_table", ""))
+                        answer_column = row["answer_column"]
+                        column_map[(student_table, student_column)] = answer_column
+                        if answer_table:
+                            column_map[(answer_table, student_column)] = answer_column
         except Exception as e:
             logger.warning(f"Failed to read column mapping report: {e}")
             
