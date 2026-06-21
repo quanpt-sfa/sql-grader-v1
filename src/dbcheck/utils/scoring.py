@@ -424,7 +424,7 @@ def score_submission(
         source_report = ""
         msg = ""
         
-        if mode == "manual_only":
+        if mode in ("manual", "manual_only"):
             orig_points = 0.0
             status_desc.append("MANUAL")
             msg = "Manual grading required"

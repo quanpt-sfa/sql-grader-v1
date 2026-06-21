@@ -40,7 +40,7 @@ def main():
     score_parser = subparsers.add_parser("score-results", help="Compute scores using config and rubric")
     score_parser.add_argument("--run-dir", required=True, help="Runs directory containing reports")
     score_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
-    score_parser.add_argument("--rubric", required=True, help="Path to grading rubric CSV file")
+    score_parser.add_argument("--rubric", required=False, default=None, help="Path to grading rubric CSV file")
     score_parser.add_argument("--overrides", required=False, default=None, help="Path to optional manual overrides CSV file")
 
     args = parser.parse_args()

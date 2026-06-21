@@ -184,6 +184,19 @@ class AssignmentConfig:
         tc_data = schema_data.get("type_compatibility") or data.get("type_compatibility") or {}
         self.type_compatibility = TypeCompatibilityConfig(tc_data)
 
+        scoring_data = data.get("scoring", {}) or {}
+        self.scoring = ScoringConfig(scoring_data)
+
+
+class ScoringConfig:
+    def __init__(self, data: Dict[str, Any]):
+        if not data:
+            data = {}
+        self.rubric_path: Optional[str] = data.get("rubric_path", None)
+        self.copy_rubric_to_run: bool = bool(data.get("copy_rubric_to_run", True))
+        self.run_rubric_filename: str = data.get("run_rubric_filename", "rubric_used.csv")
+        self.manual_overrides_filename: str = data.get("manual_overrides_filename", "manual_overrides.csv")
+
 
 def load_config(config_path: str) -> AssignmentConfig:
     path = Path(config_path)

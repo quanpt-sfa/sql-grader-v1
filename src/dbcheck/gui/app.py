@@ -183,9 +183,25 @@ def build_score_results_command(run_dir: str, config: str) -> List[str]:
         "src/dbcheck/cli/main.py",
         "score-results",
         "--run-dir", str(Path(run_dir.strip())),
-        "--config", str(Path(config.strip())),
-        "--rubric", str(Path(run_dir.strip()) / "grading_rubric.csv")
+        "--config", str(Path(config.strip()))
     ]
+    
+    # Check if config has scoring.rubric_path
+    has_config_rubric = False
+    try:
+        cfg_path = Path(config.strip())
+        if not cfg_path.is_absolute():
+            cfg_path = REPO_ROOT / cfg_path
+        cfg_obj = load_config(str(cfg_path))
+        if getattr(cfg_obj, "scoring", None) and cfg_obj.scoring.rubric_path:
+            has_config_rubric = True
+    except Exception:
+        pass
+        
+    if not has_config_rubric:
+        # Fall back to run-level grading_rubric.csv
+        cmd.extend(["--rubric", str(Path(run_dir.strip()) / "grading_rubric.csv")])
+        
     if overrides_file.exists():
         cmd.extend(["--overrides", str(Path(run_dir.strip()) / "manual_overrides.csv")])
     return cmd
@@ -549,27 +565,50 @@ class App:
             self.rq_tree.heading(col, text=col, anchor="w")
             self.rq_tree.column(col, width=120, minwidth=60, stretch=True, anchor="w")
 
-        # Tab 4: Scoring / Rubric
+        # Tab 4: Rubric
         tab_scoring = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab_scoring, text=" Scoring / Rubric ")
+        self.notebook.add(tab_scoring, text=" Rubric ")
         
-        # 1. Top action buttons bar
-        scoring_actions = ttk.Frame(tab_scoring)
-        scoring_actions.pack(fill="x", pady=(0, 10))
+        # 1. Info and Actions Frame
+        rubric_info_frame = ttk.LabelFrame(tab_scoring, text=" Rubric Status & Actions ", padding=10)
+        rubric_info_frame.pack(fill="x", pady=(0, 10))
         
-        ttk.Button(scoring_actions, text="Load Rubric", command=self._load_rubric_file).pack(side="left", padx=5)
-        ttk.Button(scoring_actions, text="Save Rubric", command=self._save_rubric).pack(side="left", padx=5)
-        self.btn_score = ttk.Button(scoring_actions, text="Score Results", style="Primary.TButton", command=lambda: self._run_command_pipeline("score-results"))
+        self.lbl_rubric_path = ttk.Label(rubric_info_frame, text="Assignment Rubric Path: -", font=("Segoe UI", 9))
+        self.lbl_rubric_path.grid(row=0, column=0, columnspan=3, sticky="w", pady=2)
+        
+        self.lbl_rubric_status = ttk.Label(rubric_info_frame, text="Status: -", font=("Segoe UI", 9))
+        self.lbl_rubric_status.grid(row=1, column=0, columnspan=3, sticky="w", pady=2)
+        
+        self.lbl_rubric_sha256 = ttk.Label(rubric_info_frame, text="SHA256: -", font=("Segoe UI", 9))
+        self.lbl_rubric_sha256.grid(row=2, column=0, columnspan=3, sticky="w", pady=2)
+        
+        btn_open_assignment_rubric = ttk.Button(rubric_info_frame, text="Open Assignment Rubric", command=self._open_assignment_rubric)
+        btn_open_assignment_rubric.grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        
+        btn_copy_rubric_to_run = ttk.Button(rubric_info_frame, text="Copy Rubric to Run", command=self._copy_rubric_to_run)
+        btn_copy_rubric_to_run.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        
+        btn_open_rubric_used = ttk.Button(rubric_info_frame, text="Open rubric_used.csv", command=self._open_rubric_used)
+        btn_open_rubric_used.grid(row=3, column=2, padx=5, pady=5, sticky="w")
+
+        # Command Buttons
+        cmd_frame = ttk.Frame(rubric_info_frame)
+        cmd_frame.grid(row=4, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+        
+        self.btn_score = ttk.Button(cmd_frame, text="Score Results", style="Primary.TButton", command=lambda: self._run_command_pipeline("score-results"))
         self.btn_score.pack(side="left", padx=5)
-        ttk.Button(scoring_actions, text="Open grading_summary.xlsx", command=self._open_grading_summary_xlsx).pack(side="left", padx=5)
         
-        # 2. Main content area
-        scoring_main = ttk.Frame(tab_scoring)
+        ttk.Button(cmd_frame, text="Open grading_summary.xlsx", command=self._open_grading_summary_xlsx).pack(side="left", padx=5)
+
+        # Legacy Rubric Editor Frame
+        legacy_frame = ttk.LabelFrame(tab_scoring, text=" Legacy run-level rubric editor. Not recommended for normal CA3 grading. ", padding=10)
+        legacy_frame.pack(fill="both", expand=True, pady=10)
+        
+        scoring_main = ttk.Frame(legacy_frame)
         scoring_main.pack(fill="both", expand=True)
         scoring_main.columnconfigure(0, weight=1)
         scoring_main.columnconfigure(1, weight=1)
         
-        # Left Frame: Standard Components
         std_frame = ttk.LabelFrame(scoring_main, text=" Standard Components ", padding=10)
         std_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         std_frame.columnconfigure(1, weight=1)
@@ -606,14 +645,12 @@ class App:
         ttk.Label(std_frame, text="Manual Section Point Allocation:").grid(row=5, column=0, sticky="w", pady=5)
         ttk.Entry(std_frame, textvariable=self.pt_manual, width=10).grid(row=5, column=1, sticky="w", padx=5, pady=5)
         
-        # Right Frame: Views / Queries
         self.rubric_views_frame = ttk.LabelFrame(scoring_main, text=" Views / Queries ", padding=10)
         self.rubric_views_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         self.rubric_views_frame.columnconfigure(1, weight=1)
         self.pt_views = {}
         
-        # 3. Bottom status and warning area
-        scoring_bottom = ttk.Frame(tab_scoring)
+        scoring_bottom = ttk.Frame(legacy_frame)
         scoring_bottom.pack(fill="x", pady=(10, 0))
         
         self.lbl_rubric_total = ttk.Label(scoring_bottom, text="Total Rubric Points: 0.00", font=("Segoe UI", 11, "bold"))
@@ -621,6 +658,184 @@ class App:
         
         self.lbl_rubric_warning = ttk.Label(scoring_bottom, text="", font=("Segoe UI", 10, "italic"))
         self.lbl_rubric_warning.pack(side="left", padx=20)
+        
+        legacy_actions = ttk.Frame(legacy_frame)
+        legacy_actions.pack(fill="x", pady=(10, 0))
+        ttk.Button(legacy_actions, text="Load Rubric", command=self._load_rubric_file).pack(side="left", padx=5)
+        ttk.Button(legacy_actions, text="Save Rubric", command=self._save_rubric).pack(side="left", padx=5)
+
+        # Tab 5: Manual Overrides
+        tab_overrides = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab_overrides, text=" Manual Overrides ")
+        tab_overrides.rowconfigure(0, weight=1)
+        tab_overrides.columnconfigure(0, weight=3)
+        tab_overrides.columnconfigure(1, weight=2)
+        
+        tree_frame = ttk.LabelFrame(tab_overrides, text=" Current Manual Overrides ", padding=5)
+        tree_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        
+        overrides_scroll_y = ttk.Scrollbar(tree_frame, orient="vertical")
+        overrides_scroll_x = ttk.Scrollbar(tree_frame, orient="horizontal")
+        self.overrides_tree = ttk.Treeview(
+            tree_frame,
+            yscrollcommand=overrides_scroll_y.set,
+            xscrollcommand=overrides_scroll_x.set,
+            selectmode="browse"
+        )
+        overrides_scroll_y.config(command=self.overrides_tree.yview)
+        overrides_scroll_x.config(command=self.overrides_tree.xview)
+        self.overrides_tree.grid(row=0, column=0, sticky="nsew")
+        overrides_scroll_y.grid(row=0, column=1, sticky="ns")
+        overrides_scroll_x.grid(row=1, column=0, sticky="ew")
+        
+        ov_cols = ["Submission ID", "Section", "Component", "Answer Object", "Override Points", "Override Status", "Reviewer Note"]
+        self.overrides_tree["columns"] = ov_cols
+        self.overrides_tree.column("#0", width=0, stretch=False)
+        for col in ov_cols:
+            self.overrides_tree.heading(col, text=col, anchor="w")
+            self.overrides_tree.column(col, width=90, minwidth=50, stretch=True, anchor="w")
+            
+        self.overrides_tree.bind("<<TreeviewSelect>>", self._on_override_row_selected)
+        
+        edit_frame = ttk.LabelFrame(tab_overrides, text=" Edit Override Entry ", padding=10)
+        edit_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        edit_frame.columnconfigure(1, weight=1)
+        
+        self.ov_sub_id_var = tk.StringVar()
+        self.ov_section_var = tk.StringVar()
+        self.ov_component_var = tk.StringVar()
+        self.ov_answer_object_var = tk.StringVar()
+        self.ov_override_points_var = tk.StringVar()
+        self.ov_override_status_var = tk.StringVar()
+        self.ov_reviewer_note_var = tk.StringVar()
+        
+        row_idx = 0
+        ttk.Label(edit_frame, text="Submission ID:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        self.ov_sub_id_combo = ttk.Combobox(edit_frame, textvariable=self.ov_sub_id_var, width=15)
+        self.ov_sub_id_combo.grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        ttk.Label(edit_frame, text="Section:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        ttk.Entry(edit_frame, textvariable=self.ov_section_var, width=15).grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        ttk.Label(edit_frame, text="Component:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        self.ov_comp_combo = ttk.Combobox(edit_frame, textvariable=self.ov_component_var, values=["tables", "columns", "primary_keys", "foreign_keys", "row_counts", "views", "manual"], state="readonly", width=15)
+        self.ov_comp_combo.grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        ttk.Label(edit_frame, text="Answer Object:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        ttk.Entry(edit_frame, textvariable=self.ov_answer_object_var, width=15).grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        ttk.Label(edit_frame, text="Override Points:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        ttk.Entry(edit_frame, textvariable=self.ov_override_points_var, width=15).grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        self.lbl_ov_points_possible = ttk.Label(edit_frame, text="Possible points: -", font=("Segoe UI", 9, "italic"))
+        self.lbl_ov_points_possible.grid(row=row_idx, column=1, sticky="w", padx=5)
+        
+        row_idx += 1
+        ttk.Label(edit_frame, text="Override Status:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        ttk.Entry(edit_frame, textvariable=self.ov_override_status_var, width=15).grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        ttk.Label(edit_frame, text="Reviewer Note:").grid(row=row_idx, column=0, sticky="w", pady=5)
+        ttk.Entry(edit_frame, textvariable=self.ov_reviewer_note_var, width=15).grid(row=row_idx, column=1, sticky="ew", padx=5, pady=5)
+        
+        row_idx += 1
+        btns_frame = ttk.Frame(edit_frame)
+        btns_frame.grid(row=row_idx, column=0, columnspan=2, pady=10, sticky="ew")
+        
+        ttk.Button(btns_frame, text="Add/Update Row", command=self._add_or_update_override_row).pack(fill="x", pady=2)
+        ttk.Button(btns_frame, text="Delete Row", command=self._delete_override_row).pack(fill="x", pady=2)
+        ttk.Button(btns_frame, text="Save Overrides", command=self._save_manual_overrides).pack(fill="x", pady=2)
+        btn_apply_scoring = ttk.Button(btns_frame, text="Apply Overrides / Re-Score", style="Primary.TButton", command=self._apply_overrides_rescore)
+        btn_apply_scoring.pack(fill="x", pady=5)
+        self.all_action_buttons.append(btn_apply_scoring)
+
+        # Tab 6: Grading Detail
+        tab_detail = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab_detail, text=" Grading Detail ")
+        tab_detail.rowconfigure(1, weight=1)
+        tab_detail.columnconfigure(0, weight=1)
+        
+        filter_frame = ttk.LabelFrame(tab_detail, text=" Filters ", padding=5)
+        filter_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        filter_frame.columnconfigure(1, weight=1)
+        filter_frame.columnconfigure(3, weight=1)
+        filter_frame.columnconfigure(5, weight=1)
+        
+        self.gd_sub_id_var = tk.StringVar()
+        self.gd_section_var = tk.StringVar()
+        self.gd_component_var = tk.StringVar(value="All")
+        self.gd_status_var = tk.StringVar()
+        self.gd_rev_req_var = tk.StringVar(value="All")
+        self.gd_override_var = tk.StringVar(value="All")
+        
+        ttk.Label(filter_frame, text="Submission ID:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.gd_sub_id_combo = ttk.Combobox(filter_frame, textvariable=self.gd_sub_id_var, width=15)
+        self.gd_sub_id_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+        
+        ttk.Label(filter_frame, text="Section:").grid(row=0, column=2, sticky="w", padx=5, pady=2)
+        ttk.Entry(filter_frame, textvariable=self.gd_section_var, width=15).grid(row=0, column=3, sticky="ew", padx=5, pady=2)
+        
+        ttk.Label(filter_frame, text="Component:").grid(row=0, column=4, sticky="w", padx=5, pady=2)
+        self.gd_comp_combo = ttk.Combobox(filter_frame, textvariable=self.gd_component_var, values=["All", "tables", "columns", "primary_keys", "foreign_keys", "row_counts", "views", "manual"], state="readonly", width=15)
+        self.gd_comp_combo.grid(row=0, column=5, sticky="ew", padx=5, pady=2)
+        
+        ttk.Label(filter_frame, text="Status:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.gd_status_combo = ttk.Combobox(filter_frame, textvariable=self.gd_status_var, width=15)
+        self.gd_status_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+        
+        ttk.Label(filter_frame, text="Review Required:").grid(row=1, column=2, sticky="w", padx=5, pady=2)
+        self.gd_rev_combo = ttk.Combobox(filter_frame, textvariable=self.gd_rev_req_var, values=["All", "Yes", "No"], state="readonly", width=15)
+        self.gd_rev_combo.grid(row=1, column=3, sticky="ew", padx=5, pady=2)
+        
+        ttk.Label(filter_frame, text="Override Applied:").grid(row=1, column=4, sticky="w", padx=5, pady=2)
+        self.gd_ov_combo = ttk.Combobox(filter_frame, textvariable=self.gd_override_var, values=["All", "Yes", "No"], state="readonly", width=15)
+        self.gd_ov_combo.grid(row=1, column=5, sticky="ew", padx=5, pady=2)
+        
+        self.gd_sub_id_var.trace_add("write", self._filter_detail_table)
+        self.gd_section_var.trace_add("write", self._filter_detail_table)
+        self.gd_component_var.trace_add("write", self._filter_detail_table)
+        self.gd_status_var.trace_add("write", self._filter_detail_table)
+        self.gd_rev_req_var.trace_add("write", self._filter_detail_table)
+        self.gd_override_var.trace_add("write", self._filter_detail_table)
+        
+        ttk.Button(filter_frame, text="Clear Filters", command=self._clear_gd_filters).grid(row=1, column=6, padx=10, pady=2)
+        
+        detail_tree_frame = ttk.Frame(tab_detail)
+        detail_tree_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+        detail_tree_frame.rowconfigure(0, weight=1)
+        detail_tree_frame.columnconfigure(0, weight=1)
+        
+        detail_scroll_y = ttk.Scrollbar(detail_tree_frame, orient="vertical")
+        detail_scroll_x = ttk.Scrollbar(detail_tree_frame, orient="horizontal")
+        self.detail_tree = ttk.Treeview(
+            detail_tree_frame,
+            yscrollcommand=detail_scroll_y.set,
+            xscrollcommand=detail_scroll_x.set,
+            selectmode="browse"
+        )
+        detail_scroll_y.config(command=self.detail_tree.yview)
+        detail_scroll_x.config(command=self.detail_tree.xview)
+        self.detail_tree.grid(row=0, column=0, sticky="nsew")
+        detail_scroll_y.grid(row=0, column=1, sticky="ns")
+        detail_scroll_x.grid(row=1, column=0, sticky="ew")
+        
+        gd_cols = ["Submission ID", "Section", "Component", "Answer Object", "Status", "Points Possible", "Original Points", "Final Points", "Review Required", "Override Applied", "Reviewer Note", "Source Report", "Message"]
+        self.detail_tree["columns"] = gd_cols
+        self.detail_tree.column("#0", width=0, stretch=False)
+        for col in gd_cols:
+            self.detail_tree.heading(col, text=col, anchor="w")
+            self.detail_tree.column(col, width=90, minwidth=50, stretch=True, anchor="w")
+            
+        action_bar = ttk.Frame(tab_detail)
+        action_bar.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        ttk.Button(action_bar, text="Create Override from Selected Item", command=self._create_override_from_detail).pack(side="left", padx=5)
         
         # Tab 5: Results Files
         tab_files = ttk.Frame(self.notebook, padding=10)
@@ -633,6 +848,10 @@ class App:
             ("grading_summary.xlsx", "grading_summary.xlsx"),
             ("grading_summary.csv", "grading_summary.csv"),
             ("grading_detail.csv", "grading_detail.csv"),
+            ("rubric_used.csv", "rubric_used.csv"),
+            ("rubric_used.sha256", "rubric_used.sha256"),
+            ("scoring_metadata.json", "scoring_metadata.json"),
+            ("manual_overrides.csv", "manual_overrides.csv"),
             ("grading_rubric.csv", "grading_rubric.csv"),
             ("review_queue.xlsx", "review_queue.xlsx"),
             ("review_queue.csv", "review_queue.csv"),
@@ -782,6 +1001,9 @@ class App:
         # Bind tracer to self.config_var to track configurations
         self.config_var.trace_add("write", self._on_config_changed)
         self._on_config_changed()
+        
+        self.run_dir_var.trace_add("write", self._on_run_dir_changed)
+        self._on_run_dir_changed()
 
     def _on_config_changed(self, *args):
         cfg_path_str = self.config_var.get().strip()
@@ -857,6 +1079,7 @@ class App:
                 self.pt_views[v_name] = var
                 ttk.Entry(self.rubric_views_frame, textvariable=var, width=10).grid(row=i, column=1, sticky="w", padx=5, pady=2)
             self._update_rubric_total()
+            self._update_rubric_info_ui()
             
         except Exception as e:
             self._clear_config_summary()
@@ -871,6 +1094,7 @@ class App:
         self.current_config_execution_mode = "compare_existing_data"
         self.test_data_entry.config(state="normal")
         self.btn_browse_test_data.config(state="normal")
+        self._update_rubric_info_ui()
 
         # Clear rubric views frame
         if hasattr(self, 'rubric_views_frame'):
@@ -1026,9 +1250,21 @@ class App:
                 "Export Results"
             ))
         elif pipeline_type == "score-results":
-            rubric_file = REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv"
-            if not rubric_file.exists():
-                self._save_rubric()
+            has_config_rubric = False
+            try:
+                cfg_path = Path(cfg.strip())
+                if not cfg_path.is_absolute():
+                    cfg_path = REPO_ROOT / cfg_path
+                config = load_config(str(cfg_path))
+                if getattr(config, "scoring", None) and config.scoring.rubric_path:
+                    has_config_rubric = True
+            except Exception:
+                pass
+                
+            if not has_config_rubric:
+                rubric_file = REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv"
+                if not rubric_file.exists():
+                    self._save_rubric()
             self.pipeline_queue.append((
                 build_score_results_command(run_dir, cfg),
                 "Score Results"
@@ -1050,9 +1286,21 @@ class App:
                 build_export_results_command(run_dir, cfg),
                 "Export Results"
             ))
-            # Append score-results if checked or rubric file already exists
-            if self.run_scoring_var.get() or (REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv").exists():
-                if self.run_scoring_var.get() and not (REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv").exists():
+            # Append score-results if checked or rubric file already exists or config defines rubric
+            has_config_rubric = False
+            try:
+                cfg_path = Path(cfg.strip())
+                if not cfg_path.is_absolute():
+                    cfg_path = REPO_ROOT / cfg_path
+                config = load_config(str(cfg_path))
+                if getattr(config, "scoring", None) and config.scoring.rubric_path:
+                    has_config_rubric = True
+            except Exception:
+                pass
+                
+            rubric_exists = (REPO_ROOT / Path(run_dir.strip()) / "grading_rubric.csv").exists()
+            if self.run_scoring_var.get() or rubric_exists or has_config_rubric:
+                if self.run_scoring_var.get() and not rubric_exists and not has_config_rubric:
                     self._save_rubric()
                 self.pipeline_queue.append((
                     build_score_results_command(run_dir, cfg),
@@ -1064,8 +1312,8 @@ class App:
             btn.config(state="disabled")
         self.btn_stop.config(state="normal")
 
-        # Auto-switch to Console / Logs tab (index 6 after adding View SQL Rewrite tab)
-        self.notebook.select(6)
+        # Auto-switch to Console / Logs tab (index 8 after adding overrides and details tabs)
+        self.notebook.select(8)
 
         self.log_text.delete("1.0", tk.END)
         self.log(f"=== Pipeline '{pipeline_type}' Started ===\n")
@@ -1320,6 +1568,9 @@ class App:
 
         # Update files tab status
         self._load_results_files_status()
+        self._load_manual_overrides()
+        self._load_grading_detail()
+        self._update_rubric_info_ui()
 
     def _populate_dashboard(self, df: pd.DataFrame):
         # Clear existing dashboard widgets
@@ -1945,10 +2196,26 @@ class App:
             messagebox.showerror("Error", "Run directory path is empty.")
             return
         run_dir = REPO_ROOT / run_dir_str
-        rubric_csv = run_dir / "grading_rubric.csv"
-        
+        rubric_csv = run_dir / "rubric_used.csv"
         if not rubric_csv.exists():
-            messagebox.showinfo("Not Found", f"Rubric file grading_rubric.csv not found in run directory. Creating defaults.")
+            rubric_csv = run_dir / "grading_rubric.csv"
+            
+        if not rubric_csv.exists():
+            try:
+                cfg_path_str = self.config_var.get().strip()
+                if cfg_path_str:
+                    config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+                    if getattr(config, "scoring", None) and config.scoring.rubric_path:
+                        path = Path(config.scoring.rubric_path)
+                        if not path.is_absolute():
+                            path = REPO_ROOT / path
+                        if path.exists():
+                            rubric_csv = path
+            except Exception:
+                pass
+                
+        if not rubric_csv.exists():
+            messagebox.showinfo("Not Found", f"Rubric file rubric_used.csv or grading_rubric.csv not found in run directory. Creating defaults.")
             self.pt_tables.set("1.0")
             self.pt_columns.set("2.0")
             self.pt_pks.set("1.0")
@@ -1999,6 +2266,340 @@ class App:
             return
         path = REPO_ROOT / run_dir_str / "grading_summary.xlsx"
         self._safe_open_path(path)
+
+    # --- New Rubric Status and Path Handlers ---
+
+    def _on_run_dir_changed(self, *args):
+        self._load_manual_overrides()
+        self._load_grading_detail()
+        self._load_results_files_status()
+        self._update_rubric_info_ui()
+
+    def _open_assignment_rubric(self):
+        cfg_path_str = self.config_var.get().strip()
+        if not cfg_path_str:
+            messagebox.showerror("Error", "Config file is empty or invalid.")
+            return
+        try:
+            config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+            if getattr(config, "scoring", None) and config.scoring.rubric_path:
+                rubric_path = Path(config.scoring.rubric_path)
+                if not rubric_path.is_absolute():
+                    rubric_path = REPO_ROOT / rubric_path
+                if rubric_path.exists():
+                    self._safe_open_path(rubric_path)
+                else:
+                    messagebox.showerror("Error", f"Rubric file not found at: {rubric_path}")
+            else:
+                messagebox.showerror("Error", "No rubric_path defined in config scoring settings.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open assignment rubric: {e}")
+
+    def _copy_rubric_to_run(self):
+        cfg_path_str = self.config_var.get().strip()
+        run_dir_str = self.run_dir_var.get().strip()
+        if not cfg_path_str or not run_dir_str:
+            messagebox.showerror("Error", "Config and Run Directory must not be empty.")
+            return
+        try:
+            config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+            if getattr(config, "scoring", None) and config.scoring.rubric_path:
+                src_path = Path(config.scoring.rubric_path)
+                if not src_path.is_absolute():
+                    src_path = REPO_ROOT / src_path
+                if not src_path.exists():
+                    messagebox.showerror("Error", f"Source rubric file not found at: {src_path}")
+                    return
+                run_dir = REPO_ROOT / run_dir_str
+                run_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = run_dir / "rubric_used.csv"
+                import shutil
+                shutil.copy2(src_path, dest_path)
+                
+                # Compute SHA256 of rubric_used.csv
+                import hashlib
+                sha256_hash = hashlib.sha256()
+                with open(dest_path, "rb") as f:
+                    for byte_block in iter(lambda: f.read(4096), b""):
+                        sha256_hash.update(byte_block)
+                sha256_val = sha256_hash.hexdigest()
+                with open(run_dir / "rubric_used.sha256", "w", encoding="utf-8") as f:
+                    f.write(sha256_val)
+                    
+                messagebox.showinfo("Success", f"Rubric copied successfully to {dest_path.name}")
+                self._load_results_files_status()
+                self._update_rubric_info_ui()
+            else:
+                messagebox.showerror("Error", "No rubric_path defined in config scoring settings.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy rubric: {e}")
+
+    def _open_rubric_used(self):
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            messagebox.showerror("Error", "Run directory path is empty.")
+            return
+        path = REPO_ROOT / run_dir_str / "rubric_used.csv"
+        if path.exists():
+            self._safe_open_path(path)
+        else:
+            messagebox.showerror("Error", f"rubric_used.csv not found in: {path.parent}")
+
+    def _update_rubric_info_ui(self):
+        cfg_path_str = self.config_var.get().strip()
+        run_dir_str = self.run_dir_var.get().strip()
+        if not cfg_path_str:
+            self.lbl_rubric_path.config(text="Assignment Rubric Path: -")
+            self.lbl_rubric_status.config(text="Status: -")
+            self.lbl_rubric_sha256.config(text="SHA256: -")
+            return
+            
+        try:
+            config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+            if getattr(config, "scoring", None) and config.scoring.rubric_path:
+                src_path = Path(config.scoring.rubric_path)
+                if not src_path.is_absolute():
+                    src_path = REPO_ROOT / src_path
+                self.lbl_rubric_path.config(text=f"Assignment Rubric Path: {config.scoring.rubric_path}")
+                if src_path.exists():
+                    self.lbl_rubric_status.config(text="Status: ✔ Found", foreground="green")
+                else:
+                    self.lbl_rubric_status.config(text="Status: ✘ Missing", foreground="red")
+            else:
+                self.lbl_rubric_path.config(text="Assignment Rubric Path: None defined in config")
+                self.lbl_rubric_status.config(text="Status: -")
+        except Exception:
+            self.lbl_rubric_path.config(text="Assignment Rubric Path: [Error parsing config]")
+            self.lbl_rubric_status.config(text="Status: -")
+            
+        if run_dir_str:
+            sha_file = REPO_ROOT / run_dir_str / "rubric_used.sha256"
+            if sha_file.exists():
+                try:
+                    sha_val = sha_file.read_text(encoding="utf-8").strip()
+                    self.lbl_rubric_sha256.config(text=f"Rubric SHA256: {sha_val}")
+                    return
+                except Exception:
+                    pass
+        self.lbl_rubric_sha256.config(text="Rubric SHA256: -")
+
+    # --- Manual Overrides Handlers ---
+
+    def _on_override_row_selected(self, event):
+        selected = self.overrides_tree.selection()
+        if not selected:
+            return
+        row_values = self.overrides_tree.item(selected[0], "values")
+        if len(row_values) >= 7:
+            self.ov_sub_id_var.set(row_values[0])
+            self.ov_section_var.set(row_values[1])
+            self.ov_component_var.set(row_values[2])
+            self.ov_answer_object_var.set(row_values[3])
+            self.ov_override_points_var.set(row_values[4])
+            self.ov_override_status_var.set(row_values[5])
+            self.ov_reviewer_note_var.set(row_values[6])
+            self.lbl_ov_points_possible.config(text="Possible points: -")
+
+    def _add_or_update_override_row(self):
+        sub_id = self.ov_sub_id_var.get().strip()
+        section = self.ov_section_var.get().strip()
+        comp = self.ov_component_var.get().strip()
+        ans_obj = self.ov_answer_object_var.get().strip()
+        pts = self.ov_override_points_var.get().strip()
+        status = self.ov_override_status_var.get().strip()
+        note = self.ov_reviewer_note_var.get().strip()
+        
+        if not sub_id:
+            messagebox.showerror("Error", "Submission ID is required.")
+            return
+            
+        found_item = None
+        for child in self.overrides_tree.get_children():
+            vals = self.overrides_tree.item(child, "values")
+            if len(vals) >= 4 and vals[0] == sub_id and vals[1] == section and vals[2] == comp and vals[3] == ans_obj:
+                found_item = child
+                break
+                
+        if found_item:
+            self.overrides_tree.item(found_item, values=(sub_id, section, comp, ans_obj, pts, status, note))
+        else:
+            self.overrides_tree.insert("", "end", values=(sub_id, section, comp, ans_obj, pts, status, note))
+
+    def _delete_override_row(self):
+        selected = self.overrides_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "No row selected to delete.")
+            return
+        for item in selected:
+            self.overrides_tree.delete(item)
+
+    def _save_manual_overrides(self):
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            messagebox.showerror("Error", "Run directory path is empty.")
+            return
+        run_dir = REPO_ROOT / run_dir_str
+        run_dir.mkdir(parents=True, exist_ok=True)
+        overrides_csv = run_dir / "manual_overrides.csv"
+        
+        try:
+            with open(overrides_csv, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["submission_id", "section", "component", "answer_object", "override_points", "override_status", "reviewer_note"])
+                for child in self.overrides_tree.get_children():
+                    writer.writerow(self.overrides_tree.item(child, "values"))
+            self.log(f"[INFO] Manual overrides saved to: {os.path.relpath(overrides_csv, REPO_ROOT)}\n")
+            self._load_results_files_status()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save manual overrides: {e}")
+
+    def _apply_overrides_rescore(self):
+        self._save_manual_overrides()
+        self._run_command_pipeline("score-results")
+
+    # --- Grading Detail Handlers ---
+
+    def _clear_gd_filters(self):
+        self.gd_sub_id_var.set("")
+        self.gd_section_var.set("")
+        self.gd_component_var.set("All")
+        self.gd_status_var.set("")
+        self.gd_rev_req_var.set("All")
+        self.gd_override_var.set("All")
+        self._filter_detail_table()
+        
+    def _filter_detail_table(self, *args):
+        for item in self.detail_tree.get_children():
+            self.detail_tree.delete(item)
+            
+        if not hasattr(self, 'all_detail_rows') or not self.all_detail_rows:
+            return
+            
+        sub_id = self.gd_sub_id_var.get().strip()
+        section = self.gd_section_var.get().strip().lower()
+        comp = self.gd_component_var.get()
+        status = self.gd_status_var.get().strip().lower()
+        rev_req = self.gd_rev_req_var.get()
+        override = self.gd_override_var.get()
+        
+        for row in self.all_detail_rows:
+            if sub_id and row.get("submission_id", "") != sub_id:
+                continue
+            if section and section not in row.get("section", "").lower():
+                continue
+            if comp != "All" and row.get("component", "") != comp:
+                continue
+            if status and status not in row.get("status", "").lower():
+                continue
+            if rev_req == "Yes" and str(row.get("review_required", "")).lower() != "true":
+                continue
+            if rev_req == "No" and str(row.get("review_required", "")).lower() == "true":
+                continue
+            if override == "Yes" and str(row.get("override_applied", "")).lower() != "true":
+                continue
+            if override == "No" and str(row.get("override_applied", "")).lower() == "true":
+                continue
+                
+            vals = (
+                row.get("submission_id", ""),
+                row.get("section", ""),
+                row.get("component", ""),
+                row.get("answer_object", ""),
+                row.get("status", ""),
+                row.get("points_possible", ""),
+                row.get("original_points_awarded", ""),
+                row.get("final_points_awarded", ""),
+                row.get("review_required", ""),
+                row.get("override_applied", ""),
+                row.get("reviewer_note", ""),
+                row.get("source_report", ""),
+                row.get("message", "")
+            )
+            self.detail_tree.insert("", "end", values=vals)
+
+    def _load_manual_overrides(self):
+        for item in self.overrides_tree.get_children():
+            self.overrides_tree.delete(item)
+            
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            return
+            
+        overrides_csv = REPO_ROOT / run_dir_str / "manual_overrides.csv"
+        if not overrides_csv.exists():
+            return
+            
+        try:
+            with open(overrides_csv, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    vals = (
+                        row.get("submission_id", ""),
+                        row.get("section", ""),
+                        row.get("component", ""),
+                        row.get("answer_object", ""),
+                        row.get("override_points", ""),
+                        row.get("override_status", ""),
+                        row.get("reviewer_note", "")
+                    )
+                    self.overrides_tree.insert("", "end", values=vals)
+        except Exception as e:
+            self.log(f"[WARNING] Failed to load manual overrides: {e}\n")
+
+    def _load_grading_detail(self):
+        self.all_detail_rows = []
+        for item in self.detail_tree.get_children():
+            self.detail_tree.delete(item)
+            
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            return
+            
+        detail_csv = REPO_ROOT / run_dir_str / "grading_detail.csv"
+        if not detail_csv.exists():
+            return
+            
+        try:
+            with open(detail_csv, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                self.all_detail_rows = list(reader)
+                
+            sids = sorted(list(set(row.get("submission_id", "") for row in self.all_detail_rows if row.get("submission_id"))))
+            self.gd_sub_id_combo["values"] = sids
+            self.ov_sub_id_combo["values"] = sids
+            
+            statuses = sorted(list(set(row.get("status", "") for row in self.all_detail_rows if row.get("status"))))
+            self.gd_status_combo["values"] = statuses
+            
+            self._filter_detail_table()
+        except Exception as e:
+            self.log(f"[WARNING] Failed to load grading detail: {e}\n")
+
+    def _create_override_from_detail(self):
+        selected = self.detail_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a row in the Grading Detail table.")
+            return
+            
+        row_values = self.detail_tree.item(selected[0], "values")
+        if len(row_values) >= 8:
+            sub_id = row_values[0]
+            section = row_values[1]
+            comp = row_values[2]
+            ans_obj = row_values[3]
+            points_possible = row_values[5]
+            final_points = row_values[7]
+            
+            self.ov_sub_id_var.set(sub_id)
+            self.ov_section_var.set(section)
+            self.ov_component_var.set(comp)
+            self.ov_answer_object_var.set(ans_obj)
+            self.ov_override_points_var.set(final_points)
+            self.ov_override_status_var.set("")
+            self.ov_reviewer_note_var.set("")
+            
+            self.lbl_ov_points_possible.config(text=f"Possible points: {points_possible}")
+            self.notebook.select(4)
 
 # --- Launcher Main Function ---
 

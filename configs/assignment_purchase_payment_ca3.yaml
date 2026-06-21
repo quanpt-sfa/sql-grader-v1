@@ -187,3 +187,10 @@ views:
         sort_by: ["TenNhaCungCap"]
         numeric_tolerance: 0.01
 
+scoring:
+  rubric_path: "configs/rubrics/purchase_payment_ca3_rubric.csv"
+  copy_rubric_to_run: true
+  run_rubric_filename: "rubric_used.csv"
+  manual_overrides_filename: "manual_overrides.csv"
+
+

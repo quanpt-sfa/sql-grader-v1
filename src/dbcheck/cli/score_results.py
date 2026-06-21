@@ -14,18 +14,51 @@ def run_score_results(args):
     """Execution endpoint for the score-results CLI command."""
     logger.info("Initializing score-results execution...")
     
+    import hashlib
+    import json
+    from datetime import datetime
+    REPO_ROOT = Path(__file__).resolve().parents[3]
+    
     # 1. Paths
     run_dir = Path(args.run_dir)
     config_path = Path(args.config)
-    rubric_path = Path(args.rubric)
-    overrides_path = Path(args.overrides) if args.overrides else None
     
     manifest_path = run_dir / "manifest.csv"
     if not manifest_path.exists():
         raise FileNotFoundError(f"manifest.csv not found in {run_dir}. Please run snapshot first.")
         
-    # 2. Load and validate config & rubric
+    # 2. Load and validate config
     config = load_config(str(config_path))
+    
+    # Resolve rubric path
+    rubric_source_path = None
+    if args.rubric:
+        rubric_path = Path(args.rubric)
+        rubric_source_path = rubric_path
+    elif getattr(config, "scoring", None) and config.scoring.rubric_path:
+        rubric_path = Path(config.scoring.rubric_path)
+        if not rubric_path.is_absolute():
+            rubric_path = REPO_ROOT / rubric_path
+        rubric_source_path = rubric_path
+    else:
+        # Fall back to run-level rubric for backward compatibility
+        rubric_path = run_dir / "grading_rubric.csv"
+        if rubric_path.exists():
+            logger.warning(f"No rubric path specified. Using legacy run-level rubric: {rubric_path}")
+            rubric_source_path = rubric_path
+        else:
+            raise FileNotFoundError(
+                "No rubric file specified. Please set scoring.rubric_path in your config file, "
+                "pass --rubric to the command line, or place grading_rubric.csv in the run directory."
+            )
+            
+    # Resolve overrides path
+    overrides_path = Path(args.overrides) if args.overrides else None
+    if not overrides_path:
+        run_overrides = run_dir / "manual_overrides.csv"
+        if run_overrides.exists():
+            overrides_path = run_overrides
+            
     rubric = load_rubric(rubric_path)
     overrides = load_overrides(overrides_path)
     
@@ -79,6 +112,40 @@ def run_score_results(args):
             
     # 6. Save reports
     # A. Copy / save rubric to run_dir
+    rubric_used_dest = run_dir / "rubric_used.csv"
+    with open(rubric_used_dest, "w", newline="", encoding="utf-8") as f:
+        headers = ["section", "component", "scope", "object_name", "total_points", "scoring_mode", "include_statuses", "partial_policy", "notes"]
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rubric:
+            out_row = {k: row.get(k, "") for k in headers}
+            writer.writerow(out_row)
+            
+    # Compute SHA256 of rubric_used.csv
+    sha256_hash = hashlib.sha256()
+    with open(rubric_used_dest, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    rubric_sha256 = sha256_hash.hexdigest()
+    
+    # Write rubric_used.sha256
+    sha_dest = run_dir / "rubric_used.sha256"
+    with open(sha_dest, "w", encoding="utf-8") as f:
+        f.write(rubric_sha256)
+        
+    # Write scoring_metadata.json
+    metadata = {
+        "rubric_source_path": str(rubric_source_path) if rubric_source_path else "",
+        "rubric_used_path": str(rubric_used_dest),
+        "rubric_sha256": rubric_sha256,
+        "manual_overrides_path": str(overrides_path) if overrides_path else "",
+        "scored_at": datetime.now().isoformat()
+    }
+    metadata_dest = run_dir / "scoring_metadata.json"
+    with open(metadata_dest, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=4)
+        
+    # Write duplicate grading_rubric.csv for backward compatibility
     rubric_dest = run_dir / "grading_rubric.csv"
     with open(rubric_dest, "w", newline="", encoding="utf-8") as f:
         headers = ["section", "component", "scope", "object_name", "total_points", "scoring_mode", "include_statuses", "partial_policy", "notes"]
