@@ -1,7 +1,7 @@
 import csv
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Optional, Tuple
 import pandas as pd
 
 from dbcheck.utils.logging import get_logger
@@ -24,6 +24,88 @@ HARD_ERROR_STATUSES = {
     "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
     "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
 }
+
+REWRITE_DETAIL_STATUSES = {
+    "VIEW_SQL_REWRITE_UNMAPPED_COLUMN": ("unmapped_columns", "Unmapped columns"),
+    "VIEW_SQL_REWRITE_UNMAPPED_TABLE": ("unmapped_tables", "Unmapped tables"),
+    "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN": ("ambiguous_columns", "Ambiguous columns"),
+}
+
+
+def _split_identifiers(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    text = str(value).strip()
+    if not text:
+        return []
+    return [part.strip() for part in text.split(";") if part.strip()]
+
+
+def _load_rewrite_diagnostics(reports_dir: Path) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    rewrite_report = reports_dir / "view_sql_rewrite_report.csv"
+    candidate_report = reports_dir / "view_candidate_match_report.csv"
+    if not rewrite_report.exists():
+        return {}, []
+
+    candidate_answer_views: Dict[str, str] = {}
+    if candidate_report.exists():
+        try:
+            with open(candidate_report, "r", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    student_view = row.get("student_view_candidate", "")
+                    answer_view = row.get("expected_view", "")
+                    if student_view and answer_view:
+                        candidate_answer_views.setdefault(student_view, answer_view)
+        except Exception:
+            pass
+
+    by_student_view: Dict[str, Dict[str, Any]] = {}
+    rows: List[Dict[str, Any]] = []
+    try:
+        with open(rewrite_report, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                student_view = row.get("student_view_name", "")
+                row["answer_view"] = candidate_answer_views.get(student_view, "")
+                rows.append(row)
+                if student_view:
+                    by_student_view[student_view] = row
+    except Exception:
+        return {}, []
+    return by_student_view, rows
+
+
+def _rewrite_detail_evidence(rewrite_row: Optional[Dict[str, Any]], status: str) -> str:
+    if not rewrite_row:
+        return ""
+    status = status.upper().strip()
+    detail = REWRITE_DETAIL_STATUSES.get(status)
+    if not detail:
+        return ""
+    field, _label = detail
+    identifiers = _split_identifiers(rewrite_row.get(field, ""))
+    parts = []
+    if identifiers:
+        parts.append(f"{field}={';'.join(identifiers)}")
+    raw_path = rewrite_row.get("raw_select_sql_path", "")
+    rewritten_path = rewrite_row.get("rewritten_sql_path", "")
+    if raw_path:
+        parts.append(f"raw_select_sql_path={raw_path}")
+    if rewritten_path:
+        parts.append(f"rewritten_sql_path={rewritten_path}")
+    return ", ".join(parts)
+
+
+def _rewrite_detail_message(rewrite_row: Optional[Dict[str, Any]], status: str) -> str:
+    status = status.upper().strip()
+    detail = REWRITE_DETAIL_STATUSES.get(status)
+    if not detail:
+        return ""
+    field, label = detail
+    identifiers = _split_identifiers((rewrite_row or {}).get(field, ""))
+    ident_text = ";".join(identifiers) if identifiers else "(not captured)"
+    return f"{label}: {ident_text}. See raw_select_sql_path and rewritten_sql_path."
 
 def get_suggested_action(status: str, component: str) -> str:
     status = status.upper().strip()
@@ -61,9 +143,9 @@ def get_suggested_action(status: str, component: str) -> str:
     elif status == "VIEW_SQL_PARSE_ERROR":
         return "Correct the view syntax or CREATE/ALTER VIEW wrapper definition."
     elif status == "VIEW_SQL_REWRITE_UNMAPPED_TABLE":
-        return "Verify that table mappings exist for all table references in the view."
+        return "Add mappings for unmapped tables listed in evidence. See raw_select_sql_path and rewritten_sql_path."
     elif status == "VIEW_SQL_REWRITE_UNMAPPED_COLUMN":
-        return "Verify that column mappings exist for all column references in the view."
+        return "Add mappings for unmapped columns listed in evidence. See raw_select_sql_path and rewritten_sql_path."
     elif status == "ROW_COUNT_MISMATCH":
         return "Ensure the student database was restored and seeded with correct data."
     elif status == "PK_REVIEW_REQUIRED":
@@ -143,6 +225,7 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
     all_fk_relationships: List[Dict[str, Any]] = []
     all_views: List[Dict[str, Any]] = []
     all_column_mapping_issues: List[Dict[str, Any]] = []
+    rewrite_unmapped_summary: Dict[tuple, Dict[str, Any]] = {}
 
     # Map of sub_id to suggested metrics
     sub_metrics: Dict[str, Dict[str, Any]] = {}
@@ -162,6 +245,32 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
         sub_dir = run_dir / "submissions" / sub_id
         reports_dir = sub_dir / "reports"
         snapshot_dir = sub_dir / "snapshot"
+        rewrite_by_student_view, rewrite_rows = _load_rewrite_diagnostics(reports_dir)
+
+        for rewrite_row in rewrite_rows:
+            rewrite_status = (rewrite_row.get("rewrite_status") or "").upper().strip()
+            if rewrite_status not in REWRITE_DETAIL_STATUSES:
+                continue
+            field, _label = REWRITE_DETAIL_STATUSES[rewrite_status]
+            identifier_type = "column" if field in ("unmapped_columns", "ambiguous_columns") else "table"
+            for identifier in _split_identifiers(rewrite_row.get(field, "")):
+                key = (
+                    identifier_type,
+                    identifier,
+                    rewrite_status,
+                    rewrite_row.get("answer_view", ""),
+                )
+                if key not in rewrite_unmapped_summary:
+                    rewrite_unmapped_summary[key] = {
+                        "identifier_type": identifier_type,
+                        "identifier": identifier,
+                        "status": rewrite_status,
+                        "answer_view": rewrite_row.get("answer_view", ""),
+                        "count": 0,
+                        "example_submission_id": sub_id,
+                        "example_raw_sql_path": rewrite_row.get("raw_select_sql_path", ""),
+                    }
+                rewrite_unmapped_summary[key]["count"] += 1
 
         if manifest_status != "OK":
             # Database restore/snapshot failed
@@ -319,6 +428,10 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
                             status = row["status"]
                             ans_view = row.get("answer_view", "")
                             stud_view = row.get("student_view", "")
+                            matched_view = row.get("matched_student_view", "") or stud_view
+                            rewrite_row = rewrite_by_student_view.get(matched_view)
+                            if not rewrite_row and status in REWRITE_DETAIL_STATUSES and len(rewrite_rows) == 1:
+                                rewrite_row = rewrite_rows[0]
                             exec_err = row.get("execution_error", "")
                             ev = (
                                 f"Ans row count: {row.get('row_count_answer','0')}, "
@@ -327,6 +440,10 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
                             )
                             if exec_err:
                                 ev += f", Exec error: {exec_err}"
+                            rewrite_evidence = _rewrite_detail_evidence(rewrite_row, status)
+                            if rewrite_evidence:
+                                ev += f", {rewrite_evidence}"
+                            rewrite_message = _rewrite_detail_message(rewrite_row, status)
 
                             # Determine severity
                             severity = "high" if status in HARD_ERROR_STATUSES else "warning" if status in REVIEW_STATUSES else "info"
@@ -339,7 +456,7 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
                                 "student_object": stud_view,
                                 "status": status,
                                 "severity": severity,
-                                "message": f"View status '{status}' for '{ans_view}'.",
+                                "message": rewrite_message or f"View status '{status}' for '{ans_view}'.",
                                 "evidence": ev,
                                 "suggested_action": get_suggested_action(status, "view")
                             }
@@ -596,6 +713,19 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
     hard_errors_path = run_dir / "hard_errors.csv"
     pd.DataFrame(all_hard_errors).to_csv(hard_errors_path, index=False)
 
+    rewrite_summary_rows = sorted(
+        rewrite_unmapped_summary.values(),
+        key=lambda r: (r["identifier_type"], r["identifier"], r["status"], r["answer_view"]),
+    )
+    rewrite_summary_path = run_dir / "view_rewrite_unmapped_summary.csv"
+    pd.DataFrame(
+        rewrite_summary_rows,
+        columns=[
+            "identifier_type", "identifier", "status", "answer_view", "count",
+            "example_submission_id", "example_raw_sql_path",
+        ],
+    ).to_csv(rewrite_summary_path, index=False)
+
     # 8. Write aggregate Excel sheets (summary.xlsx, review_queue.xlsx)
     # summary.xlsx sheets:
     # Summary, Review Queue, Hard Errors, Row Counts, PK Adequacy, FK Relationships, Views, Column Mapping Issues
@@ -609,6 +739,7 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
         pd.DataFrame(all_fk_relationships).to_excel(writer, sheet_name="FK Relationships", index=False)
         pd.DataFrame(all_views).to_excel(writer, sheet_name="Views", index=False)
         pd.DataFrame(all_column_mapping_issues).to_excel(writer, sheet_name="Column Mapping Issues", index=False)
+        pd.DataFrame(rewrite_summary_rows).to_excel(writer, sheet_name="View Rewrite Issues", index=False)
 
     # review_queue.xlsx containing a single 'Review Queue' sheet
     review_queue_xlsx_path = run_dir / "review_queue.xlsx"

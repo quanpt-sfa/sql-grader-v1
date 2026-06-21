@@ -294,6 +294,21 @@ def _empty_metrics() -> Dict[str, Any]:
     }
 
 
+def _rewrite_diagnostic_message(status: str, rw_res: Dict[str, Any]) -> str:
+    if rw_res.get("error_message"):
+        return rw_res.get("error_message", "")
+    if status == "VIEW_SQL_REWRITE_UNMAPPED_COLUMN":
+        cols = ";".join(str(x) for x in rw_res.get("unmapped_columns", []) if x)
+        return f"Unmapped columns: {cols}. See raw_select_sql_path and rewritten_sql_path."
+    if status == "VIEW_SQL_REWRITE_UNMAPPED_TABLE":
+        tables = ";".join(str(x) for x in rw_res.get("unmapped_tables", []) if x)
+        return f"Unmapped tables: {tables}. See raw_select_sql_path and rewritten_sql_path."
+    if status == "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN":
+        cols = ";".join(str(x) for x in rw_res.get("ambiguous_columns", []) if x)
+        return f"Ambiguous columns: {cols}. See raw_select_sql_path and rewritten_sql_path."
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Execution mode implementations
 # ---------------------------------------------------------------------------
@@ -739,6 +754,7 @@ def run_compare_rewritten_sql_on_answer_db(
         rw_res = rewrite_sql_query(raw_select_sql, table_map, column_map, config)
         rw_status = rw_res["status"]
         rewritten_sql = rw_res.get("rewritten_sql", "")
+        rewrite_error = _rewrite_diagnostic_message(rw_status, rw_res)
 
         # Write all .sql and .diff files
         file_paths = _write_sql_files(
@@ -747,7 +763,7 @@ def run_compare_rewritten_sql_on_answer_db(
             select_body=raw_select_sql,
             rewritten_sql=rewritten_sql,
             rewrite_status=rw_status,
-            rewrite_error=rw_res.get("error_message", ""),
+            rewrite_error=rewrite_error,
             unmapped_tables=rw_res.get("unmapped_tables", []),
             unmapped_columns=rw_res.get("unmapped_columns", []),
             ambiguous_columns=rw_res.get("ambiguous_columns", []),
@@ -770,7 +786,7 @@ def run_compare_rewritten_sql_on_answer_db(
             "raw_select_sql_path": file_paths["select_body_path"],
             "rewritten_sql_path": file_paths["rewritten_path"],
             "execution_status": "NOT_EXECUTED",
-            "execution_error": rw_res.get("error_message", "")
+            "execution_error": rewrite_error
         })
         
     # 4. Cache the expected answer outputs from answer database

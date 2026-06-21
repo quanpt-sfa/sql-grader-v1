@@ -597,3 +597,47 @@ def test_extraction_csv_contains_raw_definition_path(base_config_data, tmp_path)
     row = rows[0]
     assert "raw_definition_path" in row, "Missing raw_definition_path column"
     assert row["raw_definition_path"], "raw_definition_path should not be empty for a found definition"
+
+
+def test_unmapped_column_details_in_rewrite_report(base_config_data, tmp_path):
+    """Unmapped column names should be preserved in view_sql_rewrite_report.csv."""
+    import csv as csv_module
+
+    config = AssignmentConfig(base_config_data)
+    db_conn = MagicMock()
+    db_conn.execute_query.return_value = [
+        {
+            "view_name": "Cau1",
+            "definition": "CREATE VIEW Cau1 AS SELECT c.UnknownCol FROM dbo.CT_MuaHang c",
+        }
+    ]
+    db_conn.execute_query_df.return_value = pd.DataFrame({"PhieuMuaHang": ["PMH01"]})
+
+    (tmp_path / "table_mapping_report.csv").write_text(
+        "student_table,answer_table,match_status\nCT_MuaHang,ChiTietMuaHang,TABLE_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "column_mapping_report.csv").write_text(
+        "student_table,student_column,answer_column,match_status\n",
+        encoding="utf-8",
+    )
+
+    run_compare_rewritten_sql_on_answer_db(
+        db_conn=db_conn,
+        ans_db="ans_db",
+        stud_db="stud_db",
+        submission_id="sub1",
+        config=config,
+        expected_views=config.views,
+        output_report_path=tmp_path / "view_test_report.csv",
+        diff_dir=tmp_path / "diffs",
+        col_accept_threshold=0.88,
+        export_outputs=False,
+    )
+
+    with open(tmp_path / "view_sql_rewrite_report.csv", "r", encoding="utf-8") as f:
+        rows = list(csv_module.DictReader(f))
+    assert rows[0]["rewrite_status"] == "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
+    assert rows[0]["unmapped_columns"] == "UnknownCol"
+    assert rows[0]["raw_select_sql_path"]
+    assert rows[0]["rewritten_sql_path"]

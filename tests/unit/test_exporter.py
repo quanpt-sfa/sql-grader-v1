@@ -184,3 +184,116 @@ def test_export_results_suggested_status_and_outputs(mock_run_dir):
     assert any(r["submission_id"] == "student1" and r["status"] == "PK_MISSING" for r in he_rows)
     assert any(r["submission_id"] == "student2" and r["status"] == "FAIL_RESTORE_OR_SNAPSHOT" for r in he_rows)
     assert any(r["submission_id"] == "student3" and r["status"] == "ROW_COUNT_MISMATCH" for r in he_rows)
+
+
+def test_exporter_propagates_rewrite_diagnostics(tmp_path):
+    run_dir = tmp_path / "run_rewrite"
+    run_dir.mkdir()
+
+    with open(run_dir / "manifest.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["submission_id", "status", "error_message"])
+        writer.writerow(["s_col", "OK", ""])
+        writer.writerow(["s_table", "OK", ""])
+        writer.writerow(["s_amb", "OK", ""])
+
+    with open(run_dir / "summary.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["submission_id", "manifest_status"])
+        writer.writerow(["s_col", "OK"])
+        writer.writerow(["s_table", "OK"])
+        writer.writerow(["s_amb", "OK"])
+
+    ans_snap = run_dir / "answer_snapshot"
+    ans_snap.mkdir()
+    with open(ans_snap / "views.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["view_name"])
+        writer.writerow(["Cau1"])
+
+    cases = [
+        (
+            "s_col",
+            "VIEW_SQL_REWRITE_UNMAPPED_COLUMN",
+            "StudCol",
+            "unmapped_columns",
+            "MaHHX",
+        ),
+        (
+            "s_table",
+            "VIEW_SQL_REWRITE_UNMAPPED_TABLE",
+            "StudTable",
+            "unmapped_tables",
+            "BangHangLa",
+        ),
+        (
+            "s_amb",
+            "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN",
+            "StudAmb",
+            "ambiguous_columns",
+            "MaSo",
+        ),
+    ]
+
+    for sub_id, status, student_view, detail_field, identifier in cases:
+        reports = run_dir / "submissions" / sub_id / "reports"
+        reports.mkdir(parents=True)
+        with open(reports / "view_test_report.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "answer_view", "student_view", "matched_student_view", "status",
+                "row_count_answer", "row_count_student", "value_mismatch_count",
+                "execution_error",
+            ])
+            writer.writerow(["Cau1", student_view, student_view, status, "0", "0", "0", ""])
+
+        with open(reports / "view_candidate_match_report.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["expected_view", "student_view_candidate"])
+            writer.writerow(["Cau1", student_view])
+
+        headers = [
+            "submission_id", "student_view_name", "parse_status", "rewrite_status",
+            "safety_status", "raw_select_sql", "rewritten_sql", "raw_select_sql_path",
+            "rewritten_sql_path", "table_mappings_used", "column_mappings_used",
+            "unmapped_tables", "unmapped_columns", "ambiguous_columns",
+            "execution_status", "execution_error",
+        ]
+        row = {h: "" for h in headers}
+        row.update({
+            "submission_id": sub_id,
+            "student_view_name": student_view,
+            "parse_status": "VIEW_SQL_PARSE_SUCCESS",
+            "rewrite_status": status,
+            "safety_status": "VIEW_SQL_SAFE",
+            detail_field: identifier,
+            "raw_select_sql_path": f"submissions/{sub_id}/view_sql/select_body/{student_view}.sql",
+            "rewritten_sql_path": f"submissions/{sub_id}/view_sql/rewritten/{student_view}.sql",
+            "execution_status": "NOT_EXECUTED",
+        })
+        with open(reports / "view_sql_rewrite_report.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            writer.writerow(row)
+
+    export_results(run_dir, SimpleNamespace(name="Rewrite Diagnostics"))
+
+    with open(run_dir / "hard_errors.csv", "r", encoding="utf-8") as f:
+        hard_rows = list(csv.DictReader(f))
+    col_error = next(r for r in hard_rows if r["submission_id"] == "s_col")
+    assert "unmapped_columns=MaHHX" in col_error["evidence"]
+    assert "Unmapped columns: MaHHX" in col_error["message"]
+
+    with open(run_dir / "view_rewrite_unmapped_summary.csv", "r", encoding="utf-8") as f:
+        summary_rows = list(csv.DictReader(f))
+    assert any(
+        r["identifier_type"] == "table"
+        and r["identifier"] == "BangHangLa"
+        and r["status"] == "VIEW_SQL_REWRITE_UNMAPPED_TABLE"
+        for r in summary_rows
+    )
+
+    with open(run_dir / "review_queue.csv", "r", encoding="utf-8") as f:
+        review_rows = list(csv.DictReader(f))
+    amb_review = next(r for r in review_rows if r["submission_id"] == "s_amb")
+    assert "ambiguous_columns=MaSo" in amb_review["evidence"]
