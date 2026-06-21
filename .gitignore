@@ -10,8 +10,11 @@ build/
 dist/
 *.egg-info/
 runs/
-scratch/
 exams/
+scratch/
+solution/
+reports/
+test_data/
 *.bak
 *.mdf
 *.ldf

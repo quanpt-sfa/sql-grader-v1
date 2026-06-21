@@ -93,7 +93,7 @@ def validate_inputs(
     if command in ("snapshot", "test-views", "full"):
         ans_val = answer_bak.strip()
         if not ans_val:
-            errors.append("Answer backup file (.bak) path is required.")
+            errors.append("SQL Server backup file path is required; extension is not required but recommended.")
         else:
             ans_path = Path(ans_val)
             if not ans_path.is_absolute():

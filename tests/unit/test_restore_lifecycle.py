@@ -123,7 +123,7 @@ def test_snapshot_restores_student_once_and_drops_after_extraction(tmp_path):
     submissions_dir = tmp_path / "subs"
     submissions_dir.mkdir()
     student_bak = submissions_dir / "student1.bak"
-    student_bak.write_text("", encoding="utf-8")
+    student_bak.write_text("backup bytes", encoding="utf-8")
 
     events = []
 
@@ -141,6 +141,7 @@ def test_snapshot_restores_student_once_and_drops_after_extraction(tmp_path):
 
     with patch("dbcheck.cli.snapshot.SQLServerConnection", return_value=MagicMock()), \
          patch("dbcheck.cli.snapshot.restore_database", side_effect=fake_restore) as restore_mock, \
+         patch("dbcheck.cli.snapshot.validate_sqlserver_backup", return_value=(True, "")), \
          patch("dbcheck.cli.snapshot.drop_database", side_effect=fake_drop), \
          patch("dbcheck.cli.snapshot.get_tables", side_effect=mark("tables")), \
          patch("dbcheck.cli.snapshot.get_columns", side_effect=mark("columns")), \

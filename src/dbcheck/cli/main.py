@@ -13,7 +13,7 @@ def main():
     snap_parser = subparsers.add_parser("snapshot", help="Extract database structure snapshots")
     snap_group = snap_parser.add_mutually_exclusive_group(required=True)
     snap_group.add_argument("--answer-db", help="Existing protected answer database name")
-    snap_group.add_argument("--answer-bak", help="Path to answer database backup file (.bak)")
+    snap_group.add_argument("--answer-bak", help="Path to answer SQL Server backup file; extension is not required")
     snap_parser.add_argument("--submissions", required=True, help="Folder containing student backup files")
     snap_parser.add_argument("--run-dir", required=True, help="Output runs directory")
     snap_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
@@ -28,7 +28,7 @@ def main():
     view_parser.add_argument("--run-dir", required=True, help="Runs directory containing snapshots")
     view_parser.add_argument("--test-data", required=False, default=None, help="Folder containing CSV/SQL test data files")
     view_parser.add_argument("--config", required=True, help="Path to configuration YAML file")
-    view_parser.add_argument("--answer-bak", help="Optional path to answer database backup file (.bak)")
+    view_parser.add_argument("--answer-bak", help="Optional path to answer SQL Server backup file; extension is not required")
 
     # Command: export-results
     export_parser = subparsers.add_parser("export-results", help="Export aggregated grading results")

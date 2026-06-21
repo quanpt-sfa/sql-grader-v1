@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from dbcheck.sqlserver.connection import SQLServerConnection
 from dbcheck.utils.logging import get_logger
 
@@ -30,6 +30,24 @@ def get_logical_files(db_conn: SQLServerConnection, backup_path: Path) -> List[D
             "type": normalized_row.get("type") # 'D' for data, 'L' for log, etc.
         })
     return logical_files
+
+def validate_sqlserver_backup(db_conn: SQLServerConnection, backup_path: Path) -> Tuple[bool, str]:
+    """Return whether SQL Server can read backup metadata for a file."""
+    logger = get_logger()
+    backup_path = backup_path.resolve()
+    try:
+        logger.info(f"Validating SQL Server backup metadata for '{backup_path}'...")
+        db_conn.execute_query("RESTORE HEADERONLY FROM DISK = ?", [str(backup_path)])
+        logical_files = get_logical_files(db_conn, backup_path)
+        if not logical_files:
+            return False, "restore_metadata_failed: RESTORE FILELISTONLY returned no logical files"
+        has_data = any(str(row.get("type", "")).upper() == "D" for row in logical_files)
+        has_log = any(str(row.get("type", "")).upper() == "L" for row in logical_files)
+        if not has_data or not has_log:
+            return False, "restore_metadata_failed: backup metadata missing data or log logical file"
+        return True, ""
+    except Exception as e:
+        return False, f"restore_metadata_failed: {e}"
 
 def restore_database(db_conn: SQLServerConnection, backup_path: Path, target_db_name: str) -> None:
     """Restore a database backup file under a temporary name with moved physical files."""
