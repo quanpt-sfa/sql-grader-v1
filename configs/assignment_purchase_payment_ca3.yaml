@@ -84,7 +84,7 @@ schema:
       NhaCungCap: [NCC, NhaCungCap, NguoiCungCap, NguoiBan, Supplier, Vendor, NB, "04. NCC", "04.NCC", "04. NhaCungCap", 3.NCC, 3. NCC, 03.NhaCungCap, 03 NCC, NHACUNGCAP, Nha CC, Nhà CC, NCCap, NguoiCC, NhaCungUng]
       MuaHang: [MuaHang, Muahangg, PhieuMuaHang, PMH, Purchase, PurchaseInvoice, "05.MUAHANG", "05.Muahangg", "05. MuaHang", HD, HoaDon, SoHoaDon, 5. Mua hàng, 5.MuaHang, 6.MUA HÀNG, mua hàng, Mua hàng, MUAHANG, Muahang, Mua_Hang, PhieuNhapKho, PhieuNK, NhapKho, PNK, HoaDonMua, HoaDonMuaHang, HDMuaHang, PhieuMua, DonMuaHang]
       ChiTietMuaHang: [ChiTietMuaHang, CT_MuaHang, CTMuaHang, PurchaseDetail, "06. CT_MUAHANG", "06.CT_MuaHang", "06. ChiTietMuaHang", CTMH, ctmh, 7.CTMH, 7. CTMH, CT MuaHang, CT-Muahang, CT_MH, CHITIETMUAHANG, ChiTietMH, CTPhieuNhapKho, ChiTietNhapKho, CTPNK, CT_HoaDonMua, ChiTietHoaDonMua]
-      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien", "ThanhToan", "Thanh Toán", 5.TRẢ TIỀN, 5. Trả tiền, 6.TraTien, 6.tratien, 06.ChiTien, chitien, TRATIEN, Tratien, Tra_Tien, ThanhToanNCC, PhieuTraTien, PhieuTT, PTT, PhieuChiNCC]
+      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien", "ThanhToan", "Thanh Toán", 5.TRẢ TIỀN, 5. Trả tiền, 6.TraTien, 6.tratien, 06.ChiTien, 7.TT, 07.TT, chitien, TRATIEN, Tratien, Tra_Tien, ThanhToanNCC, PhieuTraTien, PhieuTT, PTT, PhieuChiNCC]
       ChiTietTraTien: [ChiTietTraTien, CT_ChiTien, CTChiTien, PaymentDetail, "08.CT_CHITIEN", "08.CT_ChiTien", "08. ChiTietTraTien", "CTCT", "ctct", 8.CTCT, 8. CTCT, CT-Tratien, CT_TraTien, CTTT, CTThanhToan, ChiTietThanhToan, CHITIETTRATIEN, ChiTietTT, CTPhieuChi, ChiTietPhieuChi, CTPTT]
     columns:
       global: {}
@@ -213,4 +213,3 @@ scoring:
   copy_rubric_to_run: true
   run_rubric_filename: "rubric_used.csv"
   manual_overrides_filename: "manual_overrides.csv"
-

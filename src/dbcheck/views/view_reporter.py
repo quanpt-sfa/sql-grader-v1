@@ -123,6 +123,37 @@ def _resolve_expected_views(
         vc.answer_view.lower().strip(): vc for vc in config.views
     }
 
+    def _copy_view_config_for_answer_view(source: ViewConfig, answer_view: str) -> ViewConfig:
+        copied = ViewConfig({
+            "answer_view": answer_view,
+            "answer_required": source.answer_required,
+            "student_required": source.student_required,
+            "check_mode": source.check_mode,
+            "order_sensitive": source.order_sensitive,
+            "expected_output": {
+                "columns": list(source.columns),
+                "sort_by": list(source.sort_by),
+                "numeric_tolerance": source.numeric_tolerance,
+            },
+        })
+        return copied
+
+    def _view_key_matches(config_key: str, answer_name: str) -> bool:
+        config_key = (config_key or "").strip()
+        answer_name = (answer_name or "").strip()
+        if not config_key or not answer_name:
+            return False
+        if config_key.lower() == answer_name.lower():
+            return True
+        if normalize_key(config_key) == normalize_key(answer_name):
+            return True
+        import re
+        return re.search(
+            rf"(^|[^A-Za-z0-9]){re.escape(config_key)}([^A-Za-z0-9]|$)",
+            answer_name,
+            flags=re.IGNORECASE,
+        ) is not None
+
     if config.views_mode == "explicit_config":
         return config.views
 
@@ -137,7 +168,9 @@ def _resolve_expected_views(
     all_ans_names = ans_snap_names | ans_snap_canons
 
     for cv in config.views:
-        if cv.answer_view.lower().strip() not in all_ans_names:
+        if cv.answer_view.lower().strip() not in all_ans_names and not any(
+            _view_key_matches(cv.answer_view, name) for name in all_ans_names
+        ):
             logger.warning(
                 f"[CONFIG_VIEW_NOT_IN_ANSWER_SNAPSHOT] Configured view '{cv.answer_view}' "
                 f"not present in answer snapshot — ignored."
@@ -151,8 +184,20 @@ def _resolve_expected_views(
         av_name_l = av_name.lower().strip()
 
         matched_cfg = explicit_by_canon.get(av_canon_l) or explicit_by_canon.get(av_name_l)
+        if not matched_cfg:
+            matched_cfg = next(
+                (
+                    vc for vc in config.views
+                    if _view_key_matches(vc.answer_view, av_name)
+                    or _view_key_matches(vc.answer_view, av_canon)
+                ),
+                None,
+            )
         if matched_cfg:
-            expected.append(matched_cfg)
+            if matched_cfg.answer_view.lower().strip() in {av_name_l, av_canon_l}:
+                expected.append(matched_cfg)
+            else:
+                expected.append(_copy_view_config_for_answer_view(matched_cfg, av_name))
         else:
             vc = _build_view_config_from_snapshot(av_name, av_canon, ans_view_cols_snap, explicit_by_canon)
             expected.append(vc)
@@ -306,6 +351,9 @@ def _rewrite_diagnostic_message(status: str, rw_res: Dict[str, Any]) -> str:
     if status == "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN":
         cols = ";".join(str(x) for x in rw_res.get("ambiguous_columns", []) if x)
         return f"Ambiguous columns: {cols}. See raw_select_sql_path and rewritten_sql_path."
+    if status == "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY":
+        views = ";".join(str(x) for x in rw_res.get("dependent_views", []) if x)
+        return f"dependent_view={views}"
     return ""
 
 
@@ -620,6 +668,11 @@ def run_compare_rewritten_sql_on_answer_db(
             })
     else:
         extracted_views = extract_student_views(db_conn, stud_db, submission_id, sql_dir=view_sql_dir)
+    dependent_view_names = {
+        ev.get("student_view_name") or ev.get("view_name") or ""
+        for ev in extracted_views
+        if ev.get("student_view_name") or ev.get("view_name")
+    }
     
     # Write view_sql_extraction_report.csv (updated schema with raw_definition_path)
     extract_report_path = output_report_path.parent / "view_sql_extraction_report.csv"
@@ -760,7 +813,10 @@ def run_compare_rewritten_sql_on_answer_db(
             continue
 
         # Rewrite query
-        rw_res = rewrite_sql_query(raw_select_sql, table_map, column_map, config)
+        rw_res = rewrite_sql_query(
+            raw_select_sql, table_map, column_map, config,
+            dependent_view_names=dependent_view_names,
+        )
         rw_status = rw_res["status"]
         rewritten_sql = rw_res.get("rewritten_sql", "")
         rewrite_error = _rewrite_diagnostic_message(rw_status, rw_res)
@@ -790,6 +846,7 @@ def run_compare_rewritten_sql_on_answer_db(
             "unmapped_tables": rw_res.get("unmapped_tables", []),
             "unmapped_columns": rw_res.get("unmapped_columns", []),
             "ambiguous_columns": rw_res.get("ambiguous_columns", []),
+            "dependent_views": rw_res.get("dependent_views", []),
             "raw_select_sql": raw_select_sql,
             "rewritten_sql": rewritten_sql,
             "raw_select_sql_path": file_paths["select_body_path"],
@@ -968,7 +1025,7 @@ def run_compare_rewritten_sql_on_answer_db(
         "raw_select_sql", "rewritten_sql",
         "raw_select_sql_path", "rewritten_sql_path",
         "table_mappings_used", "column_mappings_used",
-        "unmapped_tables", "unmapped_columns", "ambiguous_columns",
+        "unmapped_tables", "unmapped_columns", "ambiguous_columns", "dependent_views",
         "execution_status", "execution_error"
     ]
     with open(rewrite_report_path, "w", newline="", encoding="utf-8") as f:
@@ -978,7 +1035,8 @@ def run_compare_rewritten_sql_on_answer_db(
             rc_out = {k: rc.get(k, "") for k in _REWRITE_REPORT_FIELDS}
             # Format list fields as semicolon-separated strings
             for list_field in ("table_mappings_used", "column_mappings_used",
-                               "unmapped_tables", "unmapped_columns", "ambiguous_columns"):
+                               "unmapped_tables", "unmapped_columns", "ambiguous_columns",
+                               "dependent_views"):
                 val = rc_out[list_field]
                 if isinstance(val, list):
                     rc_out[list_field] = ";".join(str(x) for x in val)

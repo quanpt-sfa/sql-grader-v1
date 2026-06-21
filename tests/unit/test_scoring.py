@@ -301,3 +301,114 @@ def test_scoring_manual_override(tmp_path, mock_config_file):
     assert details[0]["reviewer_note"] == "Fuzzy match was acceptable manually"
     assert details[0]["status"] == "OVERRIDDEN_PASS"
     assert total_score == 1.5
+
+
+def test_rubric_csv_is_source_of_truth_without_manual_part_c(tmp_path, mock_config_file):
+    run_dir = tmp_path
+    config = load_config(str(mock_config_file))
+
+    answer_items = {
+        "tables": ["T1"],
+        "columns": ["T1.C1"],
+        "primary_keys": ["T1"],
+        "foreign_keys": ["T1|T2|C1|C2"],
+        "row_counts": ["T1"],
+        "views": [
+            "vw_Cau1_NhaCungCap_ThuDuc_Den20240630",
+            "vw_Cau2_Top10_HangHoa_MuaNhieu_Den20240630",
+            "vw_Cau3_CongNo_NhaCungCap_CuoiQ1_2024",
+        ],
+    }
+
+    rubric = [
+        {"section": "A.1", "component": "tables", "scope": "all", "object_name": "", "total_points": 2.0, "scoring_mode": "proportional", "include_statuses": "TABLE_MATCHED_EXACT", "partial_policy": "review_pending", "notes": ""},
+        {"section": "A.1", "component": "columns", "scope": "all", "object_name": "", "total_points": 2.0, "scoring_mode": "proportional", "include_statuses": "COLUMN_MATCHED_EXACT", "partial_policy": "review_pending", "notes": ""},
+        {"section": "A.1", "component": "primary_keys", "scope": "all", "object_name": "", "total_points": 1.0, "scoring_mode": "proportional", "include_statuses": "PK_MATCH_EXACT", "partial_policy": "review_pending", "notes": ""},
+        {"section": "A.2", "component": "foreign_keys", "scope": "all", "object_name": "", "total_points": 1.0, "scoring_mode": "proportional", "include_statuses": "FK_RELATIONSHIP_MATCH", "partial_policy": "review_pending", "notes": ""},
+        {"section": "A.3", "component": "row_counts", "scope": "all", "object_name": "", "total_points": 1.0, "scoring_mode": "proportional", "include_statuses": "PASS", "partial_policy": "review_pending", "notes": ""},
+        {"section": "B", "component": "views", "scope": "Cau1", "object_name": "", "total_points": 1.0, "scoring_mode": "weighted_subchecks", "include_statuses": "VIEW_PASS|VIEW_OUTPUT_MATCH", "partial_policy": "partial_view", "notes": ""},
+        {"section": "B", "component": "views", "scope": "Cau2", "object_name": "", "total_points": 1.0, "scoring_mode": "weighted_subchecks", "include_statuses": "VIEW_PASS|VIEW_OUTPUT_MATCH", "partial_policy": "partial_view", "notes": ""},
+        {"section": "B", "component": "views", "scope": "Cau3", "object_name": "", "total_points": 1.0, "scoring_mode": "weighted_subchecks", "include_statuses": "VIEW_PASS|VIEW_OUTPUT_MATCH", "partial_policy": "partial_view", "notes": ""},
+    ]
+    assert sum(row["total_points"] for row in rubric) == 10.0
+
+    reports_dir = run_dir / "submissions" / "sub1" / "reports"
+    reports_dir.mkdir(parents=True)
+
+    with open(reports_dir / "table_mapping_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["answer_table", "student_table", "match_status"])
+        w.writerow(["T1", "T1", "TABLE_MATCHED_EXACT"])
+
+    with open(reports_dir / "column_mapping_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["answer_table", "answer_column", "student_table", "student_column", "match_status"])
+        w.writerow(["T1", "C1", "T1", "C1", "COLUMN_MATCHED_EXACT"])
+
+    with open(reports_dir / "key_adequacy_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["table_name", "key_status"])
+        w.writerow(["T1", "PK_MATCH_EXACT"])
+
+    with open(reports_dir / "fk_relationship_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["answer_relationship_signature", "fk_status"])
+        w.writerow(["T1|T2|C1|C2", "FK_RELATIONSHIP_MATCH"])
+
+    with open(reports_dir / "structure_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["component", "answer_object", "status"])
+
+    with open(reports_dir / "view_test_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["answer_view", "student_view", "status", "missing_columns", "row_count_answer", "row_count_student", "value_mismatch_count"])
+        w.writerow(["vw_Cau1_NhaCungCap_ThuDuc_Den20240630", "StudCau1", "VIEW_OUTPUT_MATCH", "", "1", "1", "0"])
+        w.writerow(["vw_Cau2_Top10_HangHoa_MuaNhieu_Den20240630", "StudCau2", "VIEW_PASS", "", "1", "1", "0"])
+        w.writerow(["vw_Cau3_CongNo_NhaCungCap_CuoiQ1_2024", "StudCau3", "VIEW_PASS", "", "1", "1", "0"])
+
+    details, total_score, _rev_count, _err_count = score_submission(
+        "sub1", "OK", run_dir, config, rubric, [], answer_items
+    )
+
+    assert len(details) == len(rubric)
+    assert all(d["component"] != "manual" for d in details)
+    assert all(d["answer_object"] != "PartC" for d in details)
+    assert sum(d["points_possible"] for d in details) == 10.0
+    assert total_score == pytest.approx(10.0)
+    cau1 = next(d for d in details if d["component"] == "views" and d["answer_object"] == "Cau1")
+    assert cau1["status"] == "VIEW_OUTPUT_MATCH"
+    assert cau1["original_points_awarded"] == 1.0
+
+
+def test_scoring_handles_blank_view_numeric_fields(tmp_path, mock_config_file):
+    run_dir = tmp_path
+    config = load_config(str(mock_config_file))
+    answer_items = {
+        "tables": [], "columns": [], "primary_keys": [], "foreign_keys": [], "row_counts": [],
+        "views": ["Cau1"]
+    }
+    rubric = [{
+        "section": "B", "component": "views", "scope": "Cau1", "object_name": "",
+        "total_points": 1.0, "scoring_mode": "weighted_subchecks",
+        "include_statuses": "VIEW_PASS|VIEW_OUTPUT_MATCH",
+        "partial_policy": "partial_view", "notes": ""
+    }]
+
+    reports_dir = run_dir / "submissions" / "sub1" / "reports"
+    reports_dir.mkdir(parents=True)
+    with open(reports_dir / "view_test_report.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "answer_view", "student_view", "status", "missing_columns",
+            "row_count_answer", "row_count_student", "answer_minus_student_count",
+            "student_minus_answer_count", "value_mismatch_count", "schema_score",
+            "row_count_score", "value_score", "order_score", "total_match_score",
+        ])
+        w.writerow(["Cau1", "", "VIEW_SQL_DEFINITION_MISSING", "", "", "", "", "", "", "", "", "", "", ""])
+
+    details, total_score, _rev_count, _err_count = score_submission(
+        "sub1", "OK", run_dir, config, rubric, [], answer_items
+    )
+
+    assert total_score == 0.0
+    assert details[0]["status"] == "VIEW_SQL_DEFINITION_MISSING"

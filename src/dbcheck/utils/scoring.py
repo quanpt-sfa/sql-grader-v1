@@ -1,5 +1,6 @@
 import csv
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Set, Optional
 import pandas as pd
@@ -22,7 +23,9 @@ FAIL_STATUSES = {
     "FK_RELATIONSHIP_MISSING", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
     "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
     "VIEW_NOT_FOUND", "VIEW_EXECUTION_ERROR", "VIEW_VALUE_MISMATCH", "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH",
-    "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_ORDER_MISMATCH"
+    "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE",
+    "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY",
+    "VIEW_SQL_DEFINITION_MISSING", "VIEW_ORDER_MISMATCH"
 }
 
 REVIEW_STATUSES = {
@@ -66,6 +69,28 @@ def load_overrides(overrides_path: Path) -> List[Dict[str, Any]]:
                 row["override_points"] = 0.0
             overrides_list.append(row)
     return overrides_list
+
+def safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        text = str(value).strip()
+        if text == "":
+            return default
+        return int(float(text))
+    except (TypeError, ValueError):
+        return default
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        text = str(value).strip()
+        if text == "":
+            return default
+        return float(text)
+    except (TypeError, ValueError):
+        return default
 
 def get_answer_atomic_items(run_dir: Path, config: AssignmentConfig) -> Dict[str, List[Any]]:
     """Retrieve ground-truth atomic items from answer snapshot folder."""
@@ -296,6 +321,32 @@ def get_submission_statuses(reports_dir: Path) -> Dict[str, Dict[str, str]]:
                     
     return statuses
 
+def _normalize_view_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+def _view_scope_matches(scope: str, answer_view: str) -> bool:
+    scope = (scope or "").strip()
+    answer_view = (answer_view or "").strip()
+    if not scope or not answer_view:
+        return False
+    if scope == answer_view:
+        return True
+    if _normalize_view_key(scope) == _normalize_view_key(answer_view):
+        return True
+    pattern = rf"(^|[^A-Za-z0-9]){re.escape(scope)}([^A-Za-z0-9]|$)"
+    return re.search(pattern, answer_view, flags=re.IGNORECASE) is not None
+
+def _resolve_view_result(view_statuses: Dict[str, Dict[str, Any]], scope: str) -> Optional[Dict[str, Any]]:
+    if scope in view_statuses:
+        return view_statuses[scope]
+    matches = [
+        row for answer_view, row in view_statuses.items()
+        if _view_scope_matches(scope, answer_view)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
 def match_override(sub_id: str, row: Dict[str, Any], overrides: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Check if manual override matches a student and rubric row."""
     for o in overrides:
@@ -465,7 +516,7 @@ def score_submission(
         elif mode == "weighted_subchecks":
             # Typically views scoring
             view_name = scope
-            view_res = sub_statuses.get("views", {}).get(view_name)
+            view_res = _resolve_view_result(sub_statuses.get("views", {}), view_name)
             source_report = "view_test_report.csv"
             
             if not view_res:
@@ -482,6 +533,8 @@ def score_submission(
                 elif v_status in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT", "VIEW_EXECUTION_ERROR",
                                   "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE",
                                   "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN",
+                                  "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY",
+                                  "VIEW_SQL_DEFINITION_MISSING",
                                   "VIEW_SQL_UNSAFE_REVIEW", "VIEW_MAPPING_AMBIGUOUS"):
                     # If view is missing or fails, subchecks receive zero
                     orig_points = 0.0
@@ -499,9 +552,16 @@ def score_submission(
                         
                     # Determine subcheck truths
                     missing_cols = view_res.get("missing_columns", "").strip()
-                    row_count_ans = int(view_res.get("row_count_answer", 0))
-                    row_count_stud = int(view_res.get("row_count_student", 0))
-                    val_mismatch = int(view_res.get("value_mismatch_count", 0))
+                    row_count_ans = safe_int(view_res.get("row_count_answer", 0))
+                    row_count_stud = safe_int(view_res.get("row_count_student", 0))
+                    val_mismatch = safe_int(view_res.get("value_mismatch_count", 0))
+                    safe_int(view_res.get("answer_minus_student_count", 0))
+                    safe_int(view_res.get("student_minus_answer_count", 0))
+                    safe_float(view_res.get("schema_score", 0.0))
+                    safe_float(view_res.get("row_count_score", 0.0))
+                    safe_float(view_res.get("value_score", 0.0))
+                    safe_float(view_res.get("order_score", 0.0))
+                    safe_float(view_res.get("total_match_score", 0.0))
                     
                     subchecks = {
                         "exists": v_status not in ("VIEW_NOT_FOUND", "VIEW_NO_MATCHING_OUTPUT"),

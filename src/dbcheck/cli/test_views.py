@@ -236,7 +236,7 @@ def _write_missing_view_definitions_reports(report_path: Path, sub_id: str, ans_
             "rewrite_status", "safety_status", "raw_select_sql", "rewritten_sql",
             "raw_select_sql_path", "rewritten_sql_path", "table_mappings_used",
             "column_mappings_used", "unmapped_tables", "unmapped_columns",
-            "ambiguous_columns", "execution_status", "execution_error"
+            "ambiguous_columns", "dependent_views", "execution_status", "execution_error"
         ])
         writer.writeheader()
 

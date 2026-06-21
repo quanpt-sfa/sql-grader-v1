@@ -343,3 +343,22 @@ def test_config_view_not_in_answer_snapshot_is_ignored(minimal_config_data):
     assert "Cau1" in canonical_names
     assert "Cau2" in canonical_names
     assert len(expected) == 2
+
+
+def test_short_config_view_key_matches_full_answer_snapshot_name(minimal_config_data):
+    minimal_config_data["views"]["expected"] = [
+        {"answer_view": "Cau1", "answer_required": True, "expected_output": {"columns": []}}
+    ]
+    config = AssignmentConfig(minimal_config_data)
+
+    ans_views_snap = [
+        {
+            "view_name": "vw_Cau1_NhaCungCap_ThuDuc_Den20240630",
+            "view_name_canonical": "vw_Cau1_NhaCungCap_ThuDuc_Den20240630",
+        }
+    ]
+
+    expected = _resolve_expected_views(config, ans_views_snap, [])
+
+    assert len(expected) == 1
+    assert expected[0].answer_view == "vw_Cau1_NhaCungCap_ThuDuc_Den20240630"

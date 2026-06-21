@@ -22,13 +22,16 @@ HARD_ERROR_STATUSES = {
     "VIEW_ROW_COUNT_MISMATCH", "ROW_COUNT_MISMATCH",
     "FK_RELATIONSHIP_MISSING", "FK_RELATIONSHIP_WRONG_PARENT", "FK_RELATIONSHIP_WRONG_CHILD",
     "FK_RELATIONSHIP_WRONG_CHILD_COLUMNS", "FK_RELATIONSHIP_WRONG_PARENT_COLUMNS",
-    "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN"
+    "VIEW_NO_MATCHING_OUTPUT", "VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE",
+    "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY",
+    "VIEW_SQL_DEFINITION_MISSING"
 }
 
 REWRITE_DETAIL_STATUSES = {
     "VIEW_SQL_REWRITE_UNMAPPED_COLUMN": ("unmapped_columns", "Unmapped columns"),
     "VIEW_SQL_REWRITE_UNMAPPED_TABLE": ("unmapped_tables", "Unmapped tables"),
     "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN": ("ambiguous_columns", "Ambiguous columns"),
+    "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY": ("dependent_views", "Dependent views"),
 }
 
 
@@ -87,7 +90,8 @@ def _rewrite_detail_evidence(rewrite_row: Optional[Dict[str, Any]], status: str)
     identifiers = _split_identifiers(rewrite_row.get(field, ""))
     parts = []
     if identifiers:
-        parts.append(f"{field}={';'.join(identifiers)}")
+        evidence_field = "dependent_view" if field == "dependent_views" else field
+        parts.append(f"{evidence_field}={';'.join(identifiers)}")
     raw_path = rewrite_row.get("raw_select_sql_path", "")
     rewritten_path = rewrite_row.get("rewritten_sql_path", "")
     if raw_path:
@@ -146,6 +150,8 @@ def get_suggested_action(status: str, component: str) -> str:
         return "Add mappings for unmapped tables listed in evidence. See raw_select_sql_path and rewritten_sql_path."
     elif status == "VIEW_SQL_REWRITE_UNMAPPED_COLUMN":
         return "Add mappings for unmapped columns listed in evidence. See raw_select_sql_path and rewritten_sql_path."
+    elif status == "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY":
+        return "Inline or manually review the dependent student view listed in evidence."
     elif status == "ROW_COUNT_MISMATCH":
         return "Ensure the student database was restored and seeded with correct data."
     elif status == "PK_REVIEW_REQUIRED":
@@ -506,6 +512,48 @@ def export_results(run_dir: Path, config: Any, output_format: str = "xlsx") -> N
                         "value_mismatch_count": "0",
                         "execution_error": ""
                     })
+
+            existing_rewrite_issue_keys = {
+                (
+                    item.get("source_report", ""),
+                    item.get("status", ""),
+                    item.get("student_object", ""),
+                )
+                for item in sub_hard_errors + sub_review_items
+            }
+            for rewrite_row in rewrite_rows:
+                status = (rewrite_row.get("rewrite_status") or "").upper().strip()
+                if status not in REWRITE_DETAIL_STATUSES:
+                    continue
+                student_view = rewrite_row.get("student_view_name", "")
+                key = ("view_sql_rewrite_report.csv", status, student_view)
+                if key in existing_rewrite_issue_keys:
+                    continue
+                severity = "high" if status in HARD_ERROR_STATUSES else "warning"
+                item = {
+                    "submission_id": sub_id,
+                    "source_report": "view_sql_rewrite_report.csv",
+                    "component": "view_sql_rewrite",
+                    "answer_object": rewrite_row.get("answer_view", ""),
+                    "student_object": student_view,
+                    "status": status,
+                    "severity": severity,
+                    "message": _rewrite_detail_message(rewrite_row, status)
+                    or f"View SQL rewrite status '{status}' for '{student_view}'.",
+                    "evidence": _rewrite_detail_evidence(rewrite_row, status),
+                    "suggested_action": get_suggested_action(status, "view_sql_rewrite"),
+                }
+                existing_rewrite_issue_keys.add(key)
+                if status in HARD_ERROR_STATUSES:
+                    sub_hard_errors.append(item)
+                    all_hard_errors.append(item)
+                    hard_error_count += 1
+                elif status in REVIEW_STATUSES:
+                    sub_review_items.append(item)
+                    all_review_queue.append(item)
+                    manual_review_count += 1
+                else:
+                    warning_count += 1
 
             # E. Read column_mapping_report.csv
             col_report = reports_dir / "column_mapping_report.csv"

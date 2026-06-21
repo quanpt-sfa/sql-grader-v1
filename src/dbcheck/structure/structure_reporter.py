@@ -678,6 +678,7 @@ def run_structure_comparison(answer_dir: Path, student_dir: Path, output_report_
         with open(fk_report_path, "w", newline="", encoding="utf-8") as f:
             headers = [
                 "submission_id",
+                "fk_name",
                 "answer_fk_name",
                 "student_fk_name",
                 "answer_child_table",

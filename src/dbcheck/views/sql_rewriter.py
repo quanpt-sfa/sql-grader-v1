@@ -95,7 +95,13 @@ RESERVED_KEYWORDS = {
     "INTERSECT", "EXCEPT", "WITH", "AS", "INNER", "LEFT", "RIGHT", "FULL", "CROSS",
     "OUTER", "APPLY", "AND", "OR", "NOT", "BY", "TOP", "DISTINCT", "AS", "NULL",
     "CASE", "WHEN", "THEN", "ELSE", "END", "LIKE", "IN", "BETWEEN", "EXISTS", "IS",
-    "PERCENT", "OFFSET", "FETCH", "NEXT", "ROWS", "ONLY"
+    "PERCENT", "OFFSET", "FETCH", "NEXT", "ROWS", "ONLY", "ASC", "DESC"
+}
+
+TYPE_KEYWORDS = {
+    "DATE", "DATETIME", "DATETIME2", "SMALLDATETIME", "DECIMAL", "NUMERIC",
+    "INT", "BIGINT", "FLOAT", "REAL", "MONEY", "VARCHAR", "NVARCHAR",
+    "CHAR", "NCHAR", "BIT"
 }
 
 def _context_keys(name: Optional[str]) -> Set[str]:
@@ -482,6 +488,50 @@ def identify_select_output_aliases(tokens: List[Token]) -> Set[int]:
         
     return output_alias_indices
 
+def collect_select_output_alias_names(tokens: List[Token]) -> Set[str]:
+    alias_indices = identify_select_output_aliases(tokens)
+    aliases = set()
+    for idx in alias_indices:
+        if 0 <= idx < len(tokens):
+            aliases.update(_context_keys(clean_identifier(tokens[idx].value)))
+    return aliases
+
+def identify_order_by_alias_refs(tokens: List[Token], output_alias_names: Set[str]) -> Set[int]:
+    refs = set()
+    n = len(tokens)
+    i = 0
+    paren_depth = 0
+    while i < n:
+        t = tokens[i]
+        if t.type == "SYMBOL":
+            if t.value == "(":
+                paren_depth += 1
+            elif t.value == ")":
+                paren_depth -= 1
+        if t.type == "WORD" and t.value.upper() == "ORDER" and paren_depth == 0:
+            j = i + 1
+            while j < n and tokens[j].type in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK"):
+                j += 1
+            if j < n and tokens[j].type == "WORD" and tokens[j].value.upper() == "BY":
+                k = j + 1
+                while k < n:
+                    tk = tokens[k]
+                    if tk.type == "SYMBOL":
+                        if tk.value == "(":
+                            paren_depth += 1
+                        elif tk.value == ")":
+                            paren_depth -= 1
+                    if paren_depth == 0 and tk.type == "WORD" and tk.value.upper() in ("OFFSET", "FETCH", "UNION", "EXCEPT", "INTERSECT"):
+                        break
+                    if tk.type in ("WORD", "IDENTIFIER_BRACKET", "IDENTIFIER_QUOTE"):
+                        if _context_keys(clean_identifier(tk.value)) & output_alias_names:
+                            refs.add(k)
+                    k += 1
+                i = k
+                continue
+        i += 1
+    return refs
+
 def _process_select_item(item_indices: List[int], all_tokens: List[Token], operators: Set[str], alias_set: Set[int]) -> None:
     """Helper to detect output alias token in a single select list item."""
     # Filter out whitespace/comments
@@ -519,7 +569,8 @@ def rewrite_sql_query(
     sql: str,
     table_map: Dict[str, str],
     column_map: Dict[Tuple[str, str], str],
-    config: AssignmentConfig
+    config: AssignmentConfig,
+    dependent_view_names: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """
     Conservative clause-aware SQL identifier rewriter.
@@ -533,7 +584,11 @@ def rewrite_sql_query(
         "unmapped_tables": [],
         "unmapped_columns": [],
         "ambiguous_columns": [],
+        "dependent_views": [],
     }
+    dependent_view_keys = set()
+    for view_name in dependent_view_names or set():
+        dependent_view_keys.update(_context_keys(view_name))
     
     # 1. Tokenize
     tokens = tokenize_sql(sql)
@@ -595,6 +650,11 @@ def rewrite_sql_query(
             canon_t = _lookup_table_mapping(table_map, phys_t)
                     
             if not canon_t:
+                if _context_keys(phys_t) & dependent_view_keys:
+                    result["status"] = "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY"
+                    result["dependent_views"].append(phys_t)
+                    result["error_message"] = f"dependent_view={phys_t}"
+                    return result
                 result["status"] = "VIEW_SQL_REWRITE_UNMAPPED_TABLE"
                 result["unmapped_tables"].append(phys_t)
                 return result
@@ -626,6 +686,8 @@ def rewrite_sql_query(
             
     # 5. Output aliases
     output_alias_indices = identify_select_output_aliases(tokens)
+    output_alias_names = collect_select_output_alias_names(tokens)
+    order_by_alias_indices = identify_order_by_alias_refs(tokens, output_alias_names)
     
     # 6. Rewrite physical tables in FROM/JOIN in-place
     table_sources_to_rewrite = [src for src in table_sources if not src["is_subquery"] and not src["is_cte"]]
@@ -658,6 +720,8 @@ def rewrite_sql_query(
             table_join_indices.add(idx)
             
     output_alias_indices = identify_select_output_aliases(tokens)
+    output_alias_names = collect_select_output_alias_names(tokens)
+    order_by_alias_indices = identify_order_by_alias_refs(tokens, output_alias_names)
     
     # Re-build alias context and in_scope_physical_tables
     alias_context = {}
@@ -847,7 +911,9 @@ def rewrite_sql_query(
             val = clean_identifier(t.value)
             val_upper = val.upper()
             
-            if val_upper in RESERVED_KEYWORDS:
+            if val_upper in RESERVED_KEYWORDS or val_upper in TYPE_KEYWORDS:
+                continue
+            if idx in order_by_alias_indices:
                 continue
             if val.lower() in cte_names:
                 continue

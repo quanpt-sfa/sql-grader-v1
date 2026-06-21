@@ -348,6 +348,54 @@ def test_top_percent_keyword_not_unmapped_column(base_config_data):
     assert "PERCENT" not in res["unmapped_columns"]
 
 
+def test_convert_datetime_type_not_unmapped_column(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"04.NCC": "NhaCungCap"}
+    column_map = {("04.NCC", "TenNCC"): "TenNhaCungCap"}
+
+    res = rewrite_sql_query(
+        "SELECT CONVERT(DATETIME, '2024-06-30', 102) AS CutoffDate, [04.NCC].TenNCC FROM [04.NCC]",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "DATETIME" not in res["unmapped_columns"]
+
+
+def test_order_by_output_alias_not_unmapped_column(base_config_data):
+    config = AssignmentConfig(base_config_data)
+    table_map = {"06.CT_MuaHang": "ChiTietMuaHang"}
+    column_map = {("06.CT_MuaHang", "SoLuong"): "SoLuong"}
+
+    res = rewrite_sql_query(
+        "SELECT SUM(ct.SoLuong) AS [Tổng Số Lượng] FROM [06.CT_MuaHang] ct ORDER BY [Tổng Số Lượng] DESC",
+        table_map,
+        column_map,
+        config,
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_SUCCESS"
+    assert "Tổng Số Lượng" not in res["unmapped_columns"]
+
+
+def test_intermediate_student_view_dependency_is_not_unmapped_table(base_config_data):
+    config = AssignmentConfig(base_config_data)
+
+    res = rewrite_sql_query(
+        "SELECT * FROM Cau3datra",
+        table_map={},
+        column_map={},
+        config=config,
+        dependent_view_names={"Cau3datra"},
+    )
+
+    assert res["status"] == "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY"
+    assert res["dependent_views"] == ["Cau3datra"]
+    assert "Cau3datra" not in res["unmapped_tables"]
+
+
 def test_unqualified_column_rewrites_when_unique_in_scope(base_config_data):
     config = AssignmentConfig(base_config_data)
     table_map = {"04.NCC": "NhaCungCap"}

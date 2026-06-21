@@ -323,7 +323,7 @@ def compile_summary(run_dir: Path) -> Path:
                             row["view_partial_match_count"] += 1
                         elif v_status in ("VIEW_NO_MATCHING_OUTPUT", "VIEW_NOT_FOUND", "VIEW_NO_STUDENT_VIEWS"):
                             row["view_no_matching_output_count"] += 1
-                        elif v_status in ("VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN"):
+                        elif v_status in ("VIEW_SQL_PARSE_ERROR", "VIEW_SQL_REWRITE_UNMAPPED_TABLE", "VIEW_SQL_REWRITE_UNMAPPED_COLUMN", "VIEW_SQL_REWRITE_AMBIGUOUS_COLUMN", "VIEW_SQL_REWRITE_UNSUPPORTED_VIEW_DEPENDENCY", "VIEW_SQL_DEFINITION_MISSING"):
                             row["view_rewrite_error_count"] += 1
                         elif v_status in ("VIEW_SQL_UNSAFE_REVIEW", "VIEW_MAPPING_AMBIGUOUS", "VIEW_OUTPUT_SCHEMA_MISMATCH"):
                             row["view_review_required_count"] += 1
