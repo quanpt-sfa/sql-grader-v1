@@ -305,7 +305,11 @@ class App:
             ("Multiset Compare:", "lbl_multiset"),
             ("Key Grading Mode:", "lbl_key_mode"),
             ("Allow Surrogate Keys:", "lbl_allow_surr"),
-            ("Allow Natural Keys:", "lbl_allow_nat")
+            ("Allow Natural Keys:", "lbl_allow_nat"),
+            ("SQL Rewrite:", "lbl_sql_rewrite"),
+            ("Execute on Answer DB:", "lbl_exec_on_ans"),
+            ("Reject Unsafe SQL:", "lbl_reject_unsafe"),
+            ("Max Exec Seconds:", "lbl_max_exec_sec"),
         ]
         for idx, (label_text, attr_name) in enumerate(labels_cfg):
             ttk.Label(config_summary_frame, text=label_text).grid(row=idx, column=0, sticky="w", pady=1)
@@ -314,7 +318,7 @@ class App:
             setattr(self, attr_name, lbl_val)
 
         self.lbl_config_note = ttk.Label(config_summary_frame, font=("Segoe UI", 8, "italic"), foreground="#005999", wraplength=250, justify="left", text="")
-        self.lbl_config_note.grid(row=8, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        self.lbl_config_note.grid(row=12, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         # Panel 3: SQL Server Connection Settings (Column 2, weight 2)
         sql_frame = ttk.LabelFrame(top_frame, text=" SQL Server Settings ", padding=10)
@@ -482,9 +486,10 @@ class App:
         self.rq_filter_combo = ttk.Combobox(
             filter_frame, 
             textvariable=self.rq_filter_var,
-            values=["All Items", "Hard Errors Only", "Review Required Only", "View Issues Only", "PK/FK Issues Only", "Mapping Issues Only"],
+            values=["All Items", "Hard Errors Only", "Review Required Only", "View Issues Only",
+                    "View Rewrite Issues Only", "PK/FK Issues Only", "Mapping Issues Only"],
             state="readonly",
-            width=20
+            width=22
         )
         self.rq_filter_combo.grid(row=0, column=1, sticky="w", padx=2, pady=2)
         self.rq_filter_combo.bind("<<ComboboxSelected>>", self._on_filter_changed)
@@ -622,6 +627,7 @@ class App:
         self.notebook.add(tab_files, text=" Results Files ")
         
         self.files_list = [
+            # Per-run files
             ("summary.xlsx", "summary.xlsx"),
             ("summary.csv", "summary.csv"),
             ("grading_summary.xlsx", "grading_summary.xlsx"),
@@ -633,32 +639,111 @@ class App:
             ("hard_errors.csv", "hard_errors.csv"),
             ("execution.log", "execution.log"),
             ("student_feedback Folder", "student_feedback"),
-            # Submission-dependent view SQL folders (resolved from selected student)
-            ("view_sql Folder", "view_sql:view_sql"),
-            ("view_sql/raw Folder", "view_sql:view_sql/raw"),
-            ("view_sql/rewritten Folder", "view_sql:view_sql/rewritten"),
-            ("view_sql/diff Folder", "view_sql:view_sql/diff"),
+            # Per-submission report CSVs (resolved from selected student)
+            ("[sub] view_sql_extraction_report.csv", "sub:reports/view_sql_extraction_report.csv"),
+            ("[sub] view_sql_rewrite_report.csv", "sub:reports/view_sql_rewrite_report.csv"),
+            ("[sub] view_candidate_match_report.csv", "sub:reports/view_candidate_match_report.csv"),
+            ("[sub] view_test_report.csv", "sub:reports/view_test_report.csv"),
+            # Per-submission view SQL folders
+            ("[sub] view_sql/ Folder", "sub:view_sql"),
+            ("[sub] view_sql/raw/ Folder", "sub:view_sql/raw"),
+            ("[sub] view_sql/select_body/ Folder", "sub:view_sql/select_body"),
+            ("[sub] view_sql/rewritten/ Folder", "sub:view_sql/rewritten"),
+            ("[sub] view_sql/diff/ Folder", "sub:view_sql/diff"),
             ("Run Directory Root", "")
         ]
+        ttk.Label(
+            tab_files,
+            text="[sub] entries resolve paths for the student selected in Grading Summary Table.",
+            font=("Segoe UI", 8, "italic"), foreground="#005999",
+        ).pack(anchor="w", padx=5, pady=(0, 4))
+
         self.file_widgets = []
         for name, subpath in self.files_list:
-            row_frame = ttk.Frame(tab_files, padding=5)
-            row_frame.pack(fill="x", pady=5)
-            
-            lbl_name = ttk.Label(row_frame, text=name, font=("Segoe UI", 10, "bold"), width=25)
+            row_frame = ttk.Frame(tab_files, padding=(2, 2))
+            row_frame.pack(fill="x", pady=2)
+
+            label_color = "#444444"
+            is_sub = subpath.startswith("sub:")
+            if is_sub:
+                label_color = "#005999"  # blue tint for per-submission entries
+            lbl_name = ttk.Label(row_frame, text=name, font=("Segoe UI", 9, "bold"), width=35, foreground=label_color)
             lbl_name.pack(side="left", padx=5)
-            
+
             lbl_status = ttk.Label(row_frame, text="[Not generated]", foreground="gray")
             lbl_status.pack(side="left", padx=10)
-            
+
             btn_open = ttk.Button(row_frame, text="Open")
             btn_open.pack(side="right", padx=5)
-            
+
             self.file_widgets.append((lbl_status, btn_open, subpath))
 
         self.all_action_buttons.append(self.btn_score)
 
-        # Tab 5: Console / Logs
+        # Tab 6: View SQL Rewrite Inspection
+        tab_view_sql = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab_view_sql, text=" View SQL Rewrite ")
+        tab_view_sql.columnconfigure(0, weight=1)
+        tab_view_sql.columnconfigure(1, weight=1)
+
+        # Row 0: selectors
+        sel_frame = ttk.Frame(tab_view_sql)
+        sel_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        ttk.Label(sel_frame, text="Submission ID:").pack(side="left", padx=5)
+        self.vsr_sub_id_var = tk.StringVar()
+        self.vsr_sub_id_combo = ttk.Combobox(sel_frame, textvariable=self.vsr_sub_id_var, width=18, state="readonly")
+        self.vsr_sub_id_combo.pack(side="left", padx=5)
+        self.vsr_sub_id_combo.bind("<<ComboboxSelected>>", self._on_vsr_submission_changed)
+
+        ttk.Label(sel_frame, text="View Name:").pack(side="left", padx=(15, 5))
+        self.vsr_view_name_var = tk.StringVar()
+        self.vsr_view_name_combo = ttk.Combobox(sel_frame, textvariable=self.vsr_view_name_var, width=18, state="readonly")
+        self.vsr_view_name_combo.pack(side="left", padx=5)
+        self.vsr_view_name_combo.bind("<<ComboboxSelected>>", self._on_vsr_view_changed)
+
+        ttk.Button(sel_frame, text="Open Raw SQL", command=self._vsr_open_raw_sql).pack(side="left", padx=8)
+        ttk.Button(sel_frame, text="Open Rewritten SQL", command=self._vsr_open_rewritten_sql).pack(side="left", padx=2)
+        ttk.Button(sel_frame, text="Open Diff", command=self._vsr_open_diff).pack(side="left", padx=8)
+
+        # Row 1: status labels
+        vsr_status_frame = ttk.Frame(tab_view_sql)
+        vsr_status_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        for lbl_text, attr in [
+            ("Rewrite Status:", "lbl_vsr_rewrite_status"),
+            ("Safety Status:", "lbl_vsr_safety_status"),
+            ("Execution Status:", "lbl_vsr_exec_status"),
+            ("Execution Error:", "lbl_vsr_exec_error"),
+        ]:
+            ttk.Label(vsr_status_frame, text=lbl_text, font=("Segoe UI", 9, "bold")).pack(side="left", padx=5)
+            lv = ttk.Label(vsr_status_frame, text="-", foreground="gray")
+            lv.pack(side="left", padx=(0, 15))
+            setattr(self, attr, lv)
+
+        # Row 2: SQL preview panes (3 columns)
+        pane_configs = [
+            ("Raw SQL (original DDL)", "vsr_raw_text", 0),
+            ("SELECT Body (extracted)", "vsr_body_text", 1),
+            ("Rewritten SQL (on answer DB)", "vsr_rw_text", 2),
+        ]
+        tab_view_sql.columnconfigure(2, weight=1)
+        for pane_title, attr_name, col in pane_configs:
+            pane_frame = ttk.LabelFrame(tab_view_sql, text=f" {pane_title} ", padding=5)
+            pane_frame.grid(row=2, column=col, sticky="nsew", padx=4, pady=4)
+            pane_frame.columnconfigure(0, weight=1)
+            pane_frame.rowconfigure(0, weight=1)
+            tab_view_sql.rowconfigure(2, weight=1)
+            txt = scrolledtext.ScrolledText(pane_frame, font=("Consolas", 8), bg="#f8f8f8", width=40, height=20, wrap="none")
+            txt.grid(row=0, column=0, sticky="nsew")
+            txt.config(state="disabled")
+            setattr(self, attr_name, txt)
+
+        # Internal state for view SQL rewrite tab
+        self._vsr_current_row: Dict[str, Any] = {}
+        self._vsr_raw_path: str = ""
+        self._vsr_rw_path: str = ""
+        self._vsr_diff_path: str = ""
+
+        # Tab 7: Console / Logs
         tab_logs = ttk.Frame(self.notebook, padding=5)
         self.notebook.add(tab_logs, text=" Console / Logs ")
         tab_logs.columnconfigure(0, weight=1)
@@ -729,6 +814,19 @@ class App:
                 self.lbl_key_mode.config(text="n/a")
                 self.lbl_allow_surr.config(text="n/a")
                 self.lbl_allow_nat.config(text="n/a")
+
+            # SQL rewrite settings
+            sr = getattr(config, "sql_rewrite", None)
+            if sr and config.execution_mode == "compare_rewritten_sql_on_answer_db":
+                self.lbl_sql_rewrite.config(text="Enabled" if sr.enabled else "Disabled", foreground="green" if sr.enabled else "gray")
+                self.lbl_exec_on_ans.config(text="Yes" if sr.execute_on_answer_db else "No")
+                self.lbl_reject_unsafe.config(text="Yes" if sr.reject_unsafe_sql else "No")
+                self.lbl_max_exec_sec.config(text=str(sr.max_execution_seconds))
+            else:
+                self.lbl_sql_rewrite.config(text="n/a (mode not active)", foreground="gray")
+                self.lbl_exec_on_ans.config(text="n/a")
+                self.lbl_reject_unsafe.config(text="n/a")
+                self.lbl_max_exec_sec.config(text="n/a")
                 
             self.current_config_execution_mode = config.execution_mode
             
@@ -765,19 +863,15 @@ class App:
             self.log(f"[WARNING] Failed to parse config properties: {e}\n")
 
     def _clear_config_summary(self):
-        self.lbl_cfg_name.config(text="-")
-        self.lbl_views_mode.config(text="-")
-        self.lbl_exec_mode.config(text="-")
-        self.lbl_export_out.config(text="-")
-        self.lbl_multiset.config(text="-")
-        self.lbl_key_mode.config(text="-")
-        self.lbl_allow_surr.config(text="-")
-        self.lbl_allow_nat.config(text="-")
+        for attr in ("lbl_cfg_name", "lbl_views_mode", "lbl_exec_mode", "lbl_export_out",
+                     "lbl_multiset", "lbl_key_mode", "lbl_allow_surr", "lbl_allow_nat",
+                     "lbl_sql_rewrite", "lbl_exec_on_ans", "lbl_reject_unsafe", "lbl_max_exec_sec"):
+            getattr(self, attr).config(text="-")
         self.lbl_config_note.config(text="")
         self.current_config_execution_mode = "compare_existing_data"
         self.test_data_entry.config(state="normal")
         self.btn_browse_test_data.config(state="normal")
-        
+
         # Clear rubric views frame
         if hasattr(self, 'rubric_views_frame'):
             for widget in self.rubric_views_frame.winfo_children():
@@ -837,8 +931,16 @@ class App:
             self.btn_open_reports.config(state="normal")
         else:
             self.btn_open_reports.config(state="disabled")
-        # Refresh files tab to update submission-dependent view_sql folder buttons
+        # Refresh files tab to update submission-dependent folder/file buttons
         self._load_results_files_status()
+        # Also sync VSR submission selector with selected student
+        selected_items = self.tree.selection()
+        if selected_items:
+            row_values = self.tree.item(selected_items[0], "values")
+            if row_values:
+                sid = str(row_values[0])
+                self.vsr_sub_id_var.set(sid)
+                self._on_vsr_submission_changed()
 
     def _on_filter_changed(self, event=None):
         self._load_review_queue_data()
@@ -962,8 +1064,8 @@ class App:
             btn.config(state="disabled")
         self.btn_stop.config(state="normal")
 
-        # Auto-switch to Console / Logs tab (index 5)
-        self.notebook.select(5)
+        # Auto-switch to Console / Logs tab (index 6 after adding View SQL Rewrite tab)
+        self.notebook.select(6)
 
         self.log_text.delete("1.0", tk.END)
         self.log(f"=== Pipeline '{pipeline_type}' Started ===\n")
@@ -1124,6 +1226,8 @@ class App:
         for btn in self.all_action_buttons:
             btn.config(state="normal")
         self.btn_stop.config(state="disabled")
+        # Always refresh submission list for View SQL Rewrite tab
+        self._populate_vsr_submission_list()
         if should_refresh:
             self._load_summary_preview()
         else:
@@ -1440,9 +1544,19 @@ class App:
                 continue
             elif filter_val == "PK/FK Issues Only" and not (comp.lower() in ("primary_key", "foreign_key") or any(x in src_rep.lower() for x in ("key_adequacy", "fk_relationship"))):
                 continue
+            elif filter_val == "View Rewrite Issues Only" and not (
+                "view_sql_rewrite" in src_rep.lower()
+                or status.startswith("VIEW_SQL_")
+                or status.startswith("VIEW_EXECUTION_")
+                or status.startswith("VIEW_OUTPUT_")
+                or status.startswith("VIEW_VALUE_")
+                or status.startswith("VIEW_ORDER_")
+                or status.startswith("VIEW_NO_MATCH")
+            ):
+                continue
             elif filter_val == "Mapping Issues Only" and not ("mapping" in src_rep.lower() or "ambiguous" in status.lower() or "unmapped" in status.lower() or status == "EXTRA_REVIEW"):
                 continue
-                
+
             # Entry filters (case insensitive substring matches)
             if sub_id_filter and sub_id_filter not in sub_id.lower():
                 continue
@@ -1490,11 +1604,30 @@ class App:
                 selected_sub_id = str(row_values[0])
 
         for lbl_status, btn_open, subpath in self.file_widgets:
-            # Submission-dependent view_sql paths
+            # Per-submission paths (prefix "sub:")
+            if isinstance(subpath, str) and subpath.startswith("sub:"):
+                rel = subpath[len("sub:"):]
+                if not selected_sub_id:
+                    lbl_status.config(
+                        text="Select a submission to inspect rewritten SQL files.",
+                        foreground="gray"
+                    )
+                    btn_open.config(state="disabled")
+                    continue
+                path = run_dir / "submissions" / selected_sub_id / rel
+                if path.exists():
+                    lbl_status.config(text="✔ Available", foreground="green")
+                    btn_open.config(state="normal", command=lambda p=path: self._safe_open_path(p))
+                else:
+                    lbl_status.config(text="[Not generated]", foreground="gray")
+                    btn_open.config(state="disabled")
+                continue
+
+            # Legacy view_sql: prefix (deprecated, kept for backward compatibility)
             if isinstance(subpath, str) and subpath.startswith("view_sql:"):
                 rel = subpath[len("view_sql:"):]
                 if not selected_sub_id:
-                    lbl_status.config(text="[Select student first]", foreground="gray")
+                    lbl_status.config(text="Select a submission to inspect rewritten SQL files.", foreground="gray")
                     btn_open.config(state="disabled")
                     continue
                 path = run_dir / "submissions" / selected_sub_id / rel
@@ -1519,7 +1652,127 @@ class App:
                 lbl_status.config(text="[Not generated]", foreground="gray")
                 btn_open.config(state="disabled")
 
+    # --- View SQL Rewrite Tab handlers ---
+
+    def _populate_vsr_submission_list(self):
+        """Populate the submission combo in View SQL Rewrite tab from run directory."""
+        run_dir_str = self.run_dir_var.get().strip()
+        if not run_dir_str:
+            self.vsr_sub_id_combo["values"] = []
+            return
+        subs_root = REPO_ROOT / run_dir_str / "submissions"
+        if not subs_root.exists():
+            self.vsr_sub_id_combo["values"] = []
+            return
+        sub_ids = sorted(d.name for d in subs_root.iterdir() if d.is_dir())
+        self.vsr_sub_id_combo["values"] = sub_ids
+
+    def _on_vsr_submission_changed(self, event=None):
+        """When user changes submission in the View SQL Rewrite tab, update the view list."""
+        sub_id = self.vsr_sub_id_var.get().strip()
+        run_dir_str = self.run_dir_var.get().strip()
+        if not sub_id or not run_dir_str:
+            self.vsr_view_name_combo["values"] = []
+            return
+        rewrite_report = REPO_ROOT / run_dir_str / "submissions" / sub_id / "reports" / "view_sql_rewrite_report.csv"
+        view_names = []
+        if rewrite_report.exists():
+            try:
+                with open(rewrite_report, "r", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        vn = row.get("student_view_name", "")
+                        if vn and vn not in view_names:
+                            view_names.append(vn)
+            except Exception:
+                pass
+        # Fallback: list .sql files in view_sql/raw/
+        if not view_names:
+            raw_dir = REPO_ROOT / run_dir_str / "submissions" / sub_id / "view_sql" / "raw"
+            if raw_dir.exists():
+                view_names = sorted(p.stem for p in raw_dir.glob("*.sql"))
+        self.vsr_view_name_combo["values"] = view_names
+        if view_names:
+            self.vsr_view_name_var.set(view_names[0])
+            self._on_vsr_view_changed()
+
+    def _on_vsr_view_changed(self, event=None):
+        """When user selects a view name, load SQL previews and update status labels."""
+        sub_id = self.vsr_sub_id_var.get().strip()
+        view_name = self.vsr_view_name_var.get().strip()
+        run_dir_str = self.run_dir_var.get().strip()
+        if not sub_id or not view_name or not run_dir_str:
+            return
+
+        sub_path = REPO_ROOT / run_dir_str / "submissions" / sub_id
+        raw_sql_path = sub_path / "view_sql" / "raw" / f"{view_name}.sql"
+        body_sql_path = sub_path / "view_sql" / "select_body" / f"{view_name}.sql"
+        rw_sql_path = sub_path / "view_sql" / "rewritten" / f"{view_name}.sql"
+        diff_path = sub_path / "view_sql" / "diff" / f"{view_name}.diff.txt"
+
+        self._vsr_raw_path = str(raw_sql_path)
+        self._vsr_rw_path = str(rw_sql_path)
+        self._vsr_diff_path = str(diff_path)
+
+        def _set_text(widget, content: str):
+            widget.config(state="normal")
+            widget.delete("1.0", tk.END)
+            widget.insert("1.0", content)
+            widget.config(state="disabled")
+
+        _set_text(self.vsr_raw_text, raw_sql_path.read_text(encoding="utf-8") if raw_sql_path.exists() else "[Not generated]")
+        _set_text(self.vsr_body_text, body_sql_path.read_text(encoding="utf-8") if body_sql_path.exists() else "[Not generated]")
+        _set_text(self.vsr_rw_text, rw_sql_path.read_text(encoding="utf-8") if rw_sql_path.exists() else "[Not generated]")
+
+        # Load status labels from view_sql_rewrite_report.csv
+        rewrite_report = sub_path / "reports" / "view_sql_rewrite_report.csv"
+        self._vsr_current_row = {}
+        if rewrite_report.exists():
+            try:
+                with open(rewrite_report, "r", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        if row.get("student_view_name", "") == view_name:
+                            self._vsr_current_row = row
+                            break
+            except Exception:
+                pass
+
+        row = self._vsr_current_row
+        rewrite_status = row.get("rewrite_status", "-")
+        safety_status = row.get("safety_status", "-")
+        exec_status = row.get("execution_status", "-")
+        exec_error = row.get("execution_error", "") or "-"
+
+        def _status_color(s: str) -> str:
+            if not s or s == "-":
+                return "gray"
+            s_upper = s.upper()
+            if "OK" in s_upper or "PASS" in s_upper or "SUCCESS" in s_upper:
+                return "green"
+            if "ERROR" in s_upper or "FAIL" in s_upper or "UNSAFE" in s_upper:
+                return "red"
+            if "WARN" in s_upper or "PARSE_ERROR" in s_upper or "AMBIGUOUS" in s_upper:
+                return "orange"
+            return "black"
+
+        self.lbl_vsr_rewrite_status.config(text=rewrite_status, foreground=_status_color(rewrite_status))
+        self.lbl_vsr_safety_status.config(text=safety_status, foreground=_status_color(safety_status))
+        self.lbl_vsr_exec_status.config(text=exec_status, foreground=_status_color(exec_status))
+        self.lbl_vsr_exec_error.config(text=(exec_error[:80] + "…" if len(exec_error) > 80 else exec_error), foreground="red" if exec_error != "-" else "gray")
+
+    def _vsr_open_raw_sql(self):
+        if self._vsr_raw_path:
+            self._safe_open_path(Path(self._vsr_raw_path))
+
+    def _vsr_open_rewritten_sql(self):
+        if self._vsr_rw_path:
+            self._safe_open_path(Path(self._vsr_rw_path))
+
+    def _vsr_open_diff(self):
+        if self._vsr_diff_path:
+            self._safe_open_path(Path(self._vsr_diff_path))
+
     def _safe_open_path(self, path: Path):
+
         if not path.exists():
             messagebox.showerror("Error", f"Path does not exist: {path}")
             return

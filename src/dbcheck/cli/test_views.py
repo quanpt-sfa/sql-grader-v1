@@ -242,6 +242,22 @@ def run_test_views(args):
             f"--test-data provided but execution_mode={execution_mode}; test data will not be used."
         )
 
+    # For compare_rewritten_sql_on_answer_db, mapping reports from compare-structure are required.
+    # Check that at least one submission has table_mapping_report.csv.
+    if execution_mode == "compare_rewritten_sql_on_answer_db":
+        subs_root = run_dir / "submissions"
+        mapping_report_found = False
+        if subs_root.exists():
+            for sub_dir in subs_root.iterdir():
+                if (sub_dir / "reports" / "table_mapping_report.csv").exists():
+                    mapping_report_found = True
+                    break
+        if not mapping_report_found:
+            raise ValueError(
+                "Mapped-SQL view grading requires table_mapping_report.csv and "
+                "column_mapping_report.csv. Run compare-structure first."
+            )
+
     # 3. Read answer snapshot view count (needed for COMMAND_ERROR fallback)
     answer_view_count = _count_answer_snapshot_views(answer_snapshot_dir)
 

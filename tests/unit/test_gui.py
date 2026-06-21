@@ -203,3 +203,59 @@ def test_gui_additional_command_construction():
     assert comp[2] == "compare-structure"
     assert views[2] == "test-views"
     assert export[2] == "export-results"
+
+
+def test_compare_rewritten_sql_command_construction():
+    """compare_rewritten_sql_on_answer_db mode: no --test-data, --answer-bak is included."""
+    ans = "solution/dapan.bak"
+    run = "runs/run_test"
+    cfg = "configs/assignment_purchase_payment_ca3.yaml"
+    td = "test_data"
+
+    view_cmd = build_test_views_command(
+        run_dir=run,
+        test_data=td,
+        config=cfg,
+        answer_bak=ans,
+        execution_mode="compare_rewritten_sql_on_answer_db",
+    )
+    assert "--test-data" not in view_cmd, "compare_rewritten_sql_on_answer_db must not pass --test-data"
+    assert "--answer-bak" in view_cmd
+    assert view_cmd[view_cmd.index("--answer-bak") + 1] == str(Path(ans))
+
+
+def test_validate_inputs_rewritten_sql_mode(tmp_path):
+    """compare_rewritten_sql_on_answer_db mode: test data validation is skipped."""
+    cfg_file = tmp_path / "assignment.yaml"
+    cfg_file.write_text("assignment:\n  name: Test")
+    ans_bak = tmp_path / "dapan.bak"
+    ans_bak.write_text("dummy")
+    subs_dir = tmp_path / "exams"
+    subs_dir.mkdir()
+    run_dir = tmp_path / "runs" / "run_1"
+
+    # In compare_rewritten_sql_on_answer_db mode, missing test_data must NOT trigger an error.
+    errors = validate_inputs(
+        answer_bak=str(ans_bak),
+        submissions=str(subs_dir),
+        config=str(cfg_file),
+        test_data="missing_test_data",
+        run_dir=str(run_dir),
+        command="test-views",
+        execution_mode="compare_rewritten_sql_on_answer_db",
+    )
+    assert not any("Test data folder does not exist" in e for e in errors), (
+        "Test data must not be required in compare_rewritten_sql_on_answer_db mode"
+    )
+
+    # In compare_seeded_test_data mode, missing test_data MUST trigger an error.
+    errors_seeded = validate_inputs(
+        answer_bak=str(ans_bak),
+        submissions=str(subs_dir),
+        config=str(cfg_file),
+        test_data="missing_test_data",
+        run_dir=str(run_dir),
+        command="test-views",
+        execution_mode="compare_seeded_test_data",
+    )
+    assert any("Test data folder does not exist" in e for e in errors_seeded)

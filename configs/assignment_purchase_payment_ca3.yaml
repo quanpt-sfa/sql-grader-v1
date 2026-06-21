@@ -112,9 +112,17 @@ schema:
 
 views:
   mode: answer_snapshot
-  execution_mode: compare_existing_data
+  execution_mode: compare_rewritten_sql_on_answer_db
   export_outputs: true
   compare_as_multiset: true
+  sql_rewrite:
+    enabled: true
+    use_existing_mapping_reports: true
+    reject_unsafe_sql: true
+    execute_on_answer_db: true
+    allow_weak_column_aliases: false
+    allow_weak_table_aliases: false
+    max_execution_seconds: 10
   expected:
     - answer_view: "Cau1"
       answer_required: true
