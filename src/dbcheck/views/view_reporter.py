@@ -18,6 +18,7 @@ Statuses emitted (per view):
 """
 
 import csv
+import difflib
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -192,6 +193,95 @@ def _export_diff_csv(diff_df: Optional[pd.DataFrame], path: Path) -> None:
         diff_df.to_csv(path, index=False, encoding="utf-8")
     else:
         path.write_text("", encoding="utf-8")
+
+
+def _write_sql_files(
+    sql_dir: Path,
+    view_name: str,
+    raw_definition: str,
+    select_body: str,
+    rewritten_sql: str,
+    rewrite_status: str,
+    rewrite_error: str,
+    unmapped_tables: Any,
+    unmapped_columns: Any,
+    ambiguous_columns: Any,
+) -> Dict[str, str]:
+    """Write raw/select_body/rewritten/*.sql and diff/*.diff.txt for one view.
+
+    Returns a dict with keys: raw_path, select_body_path, rewritten_path, diff_path
+    (all as POSIX strings relative to the run directory, or empty string if not written).
+    """
+    raw_dir = sql_dir / "raw"
+    body_dir = sql_dir / "select_body"
+    rw_dir = sql_dir / "rewritten"
+    diff_dir_out = sql_dir / "diff"
+
+    for d in (raw_dir, body_dir, rw_dir, diff_dir_out):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Sanitize view name for use as a filename (replace characters that break paths on Windows)
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in view_name)
+
+    raw_path = raw_dir / f"{safe_name}.sql"
+    body_path = body_dir / f"{safe_name}.sql"
+    rw_path = rw_dir / f"{safe_name}.sql"
+    diff_path = diff_dir_out / f"{safe_name}.diff.txt"
+
+    # 1. Raw definition
+    if raw_definition:
+        raw_path.write_text(raw_definition, encoding="utf-8")
+
+    # 2. Select body
+    if select_body:
+        body_path.write_text(select_body, encoding="utf-8")
+
+    # 3. Rewritten SQL (or failure diagnostic header)
+    if rewrite_status == "VIEW_SQL_REWRITE_SUCCESS" and rewritten_sql:
+        rw_path.write_text(rewritten_sql, encoding="utf-8")
+    else:
+        # Write diagnostic comment header followed by original select body
+        lines = [
+            "-- Rewrite failed",
+            f"-- Status: {rewrite_status}",
+        ]
+        if rewrite_error:
+            lines.append(f"-- Error: {rewrite_error}")
+        if isinstance(unmapped_tables, list) and unmapped_tables:
+            lines.append(f"-- Unmapped tables: {', '.join(str(x) for x in unmapped_tables)}")
+        elif isinstance(unmapped_tables, str) and unmapped_tables:
+            lines.append(f"-- Unmapped tables: {unmapped_tables}")
+        if isinstance(unmapped_columns, list) and unmapped_columns:
+            lines.append(f"-- Unmapped columns: {', '.join(str(x) for x in unmapped_columns)}")
+        elif isinstance(unmapped_columns, str) and unmapped_columns:
+            lines.append(f"-- Unmapped columns: {unmapped_columns}")
+        if isinstance(ambiguous_columns, list) and ambiguous_columns:
+            lines.append(f"-- Ambiguous columns: {', '.join(str(x) for x in ambiguous_columns)}")
+        elif isinstance(ambiguous_columns, str) and ambiguous_columns:
+            lines.append(f"-- Ambiguous columns: {ambiguous_columns}")
+        lines.append("")
+        if select_body:
+            lines.append(select_body)
+        rw_path.write_text("\n".join(lines), encoding="utf-8")
+
+    # 4. Unified diff: select_body vs rewritten (or diagnostic)
+    from_text = (select_body or raw_definition or "").splitlines(keepends=True)
+    to_text = (rewritten_sql if rewrite_status == "VIEW_SQL_REWRITE_SUCCESS" and rewritten_sql else rw_path.read_text(encoding="utf-8")).splitlines(keepends=True)
+    diff_lines = list(difflib.unified_diff(
+        from_text,
+        to_text,
+        fromfile=f"select_body/{safe_name}.sql",
+        tofile=f"rewritten/{safe_name}.sql",
+        lineterm="",
+    ))
+    diff_path.write_text("\n".join(diff_lines), encoding="utf-8")
+
+    return {
+        "raw_path": str(raw_path),
+        "select_body_path": str(body_path) if select_body else "",
+        "rewritten_path": str(rw_path),
+        "diff_path": str(diff_path),
+    }
 
 
 def _empty_metrics() -> Dict[str, Any]:
@@ -403,7 +493,17 @@ def _build_result(
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def extract_student_views(db_conn: Any, stud_db: str, submission_id: str) -> List[Dict[str, Any]]:
+def extract_student_views(
+    db_conn: Any,
+    stud_db: str,
+    submission_id: str,
+    sql_dir: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Extract student view SQL from the database.
+
+    If *sql_dir* is provided, write each raw DDL definition to
+    ``sql_dir/raw/<view_name>.sql`` and record the path in the result dict.
+    """
     logger = get_logger()
     sql = """
     SELECT 
@@ -419,12 +519,22 @@ def extract_student_views(db_conn: Any, stud_db: str, submission_id: str) -> Lis
         for r in rows:
             view_name = r["view_name"]
             definition = r["definition"]
+            raw_definition_path = ""
             if definition:
+                # Write raw SQL file
+                if sql_dir is not None:
+                    raw_dir = sql_dir / "raw"
+                    raw_dir.mkdir(parents=True, exist_ok=True)
+                    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in view_name)
+                    raw_file = raw_dir / f"{safe_name}.sql"
+                    raw_file.write_text(definition, encoding="utf-8")
+                    raw_definition_path = str(raw_file)
                 results.append({
                     "submission_id": submission_id,
                     "student_view_name": view_name,
                     "definition_found": True,
                     "raw_definition": definition,
+                    "raw_definition_path": raw_definition_path,
                     "extract_status": "VIEW_SQL_EXTRACTED",
                     "extract_error": ""
                 })
@@ -434,6 +544,7 @@ def extract_student_views(db_conn: Any, stud_db: str, submission_id: str) -> Lis
                     "student_view_name": view_name,
                     "definition_found": False,
                     "raw_definition": "",
+                    "raw_definition_path": "",
                     "extract_status": "VIEW_SQL_DEFINITION_MISSING",
                     "extract_error": ""
                 })
@@ -448,6 +559,7 @@ def extract_student_views(db_conn: Any, stud_db: str, submission_id: str) -> Lis
                     "student_view_name": view_name,
                     "definition_found": False,
                     "raw_definition": "",
+                    "raw_definition_path": "",
                     "extract_status": "VIEW_SQL_EXTRACTION_ERROR",
                     "extract_error": str(e)
                 })
@@ -471,20 +583,28 @@ def run_compare_rewritten_sql_on_answer_db(
 ) -> List[Dict[str, Any]]:
     logger = get_logger()
     output_report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Compute view_sql_dir: runs/<run_id>/submissions/<submission_id>/view_sql/
+    # output_report_path is runs/<run_id>/submissions/<submission_id>/reports/view_test_report.csv
+    view_sql_dir = output_report_path.parent.parent / "view_sql"
+    view_sql_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Extract student views DDL, writing raw/*.sql files
+    extracted_views = extract_student_views(db_conn, stud_db, submission_id, sql_dir=view_sql_dir)
     
-    # 1. Extract student views DDL
-    extracted_views = extract_student_views(db_conn, stud_db, submission_id)
-    
-    # Write view_sql_extraction_report.csv
+    # Write view_sql_extraction_report.csv (updated schema with raw_definition_path)
     extract_report_path = output_report_path.parent / "view_sql_extraction_report.csv"
     with open(extract_report_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "submission_id", "student_view_name", "definition_found", 
-            "raw_definition", "extract_status", "extract_error"
+            "submission_id", "student_view_name", "definition_found",
+            "raw_definition", "raw_definition_path", "extract_status", "extract_error"
         ])
         writer.writeheader()
         for ev in extracted_views:
-            writer.writerow(ev)
+            writer.writerow({k: ev.get(k, "") for k in [
+                "submission_id", "student_view_name", "definition_found",
+                "raw_definition", "raw_definition_path", "extract_status", "extract_error"
+            ]})
             
     # 2. Load accepted mapping reports
     table_map = {}
@@ -522,12 +642,24 @@ def run_compare_rewritten_sql_on_answer_db(
         except Exception as e:
             logger.warning(f"Failed to read column mapping report: {e}")
             
-    # 3. Rewrite each safe candidate
+    # 3. Rewrite each safe candidate and write .sql files
     rewritten_candidates = []
-    
+
     for ev in extracted_views:
         student_view_name = ev["student_view_name"]
+        raw_definition = ev.get("raw_definition", "")
+        raw_definition_path = ev.get("raw_definition_path", "")
+
         if not ev["definition_found"]:
+            # Still write diagnostic rewritten SQL file (failure comment only)
+            file_paths = _write_sql_files(
+                view_sql_dir, student_view_name,
+                raw_definition="", select_body="",
+                rewritten_sql="",
+                rewrite_status="VIEW_SQL_REWRITE_PARSE_ERROR",
+                rewrite_error=ev.get("extract_error") or "View definition missing.",
+                unmapped_tables=[], unmapped_columns=[], ambiguous_columns=[],
+            )
             rewritten_candidates.append({
                 "submission_id": submission_id,
                 "student_view_name": student_view_name,
@@ -542,20 +674,32 @@ def run_compare_rewritten_sql_on_answer_db(
                 "ambiguous_columns": "",
                 "raw_select_sql": "",
                 "rewritten_sql": "",
+                "raw_select_sql_path": file_paths["select_body_path"],
+                "rewritten_sql_path": file_paths["rewritten_path"],
                 "execution_status": "NOT_EXECUTED",
-                "execution_error": ev["extract_error"] or "View definition missing."
+                "execution_error": ev.get("extract_error") or "View definition missing."
             })
             continue
-            
-        raw_definition = ev["raw_definition"]
+
+        # Extract SELECT body
+        parse_error_msg = ""
         try:
             raw_select_sql = extract_select_body(raw_definition)
             parse_status = "VIEW_SQL_PARSE_SUCCESS"
         except Exception as e:
             raw_select_sql = ""
             parse_status = "VIEW_SQL_PARSE_ERROR"
-            
+            parse_error_msg = str(e)
+
         if parse_status == "VIEW_SQL_PARSE_ERROR":
+            file_paths = _write_sql_files(
+                view_sql_dir, student_view_name,
+                raw_definition=raw_definition, select_body="",
+                rewritten_sql="",
+                rewrite_status="VIEW_SQL_REWRITE_PARSE_ERROR",
+                rewrite_error=parse_error_msg or "Could not parse DDL to extract SELECT statement query body.",
+                unmapped_tables=[], unmapped_columns=[], ambiguous_columns=[],
+            )
             rewritten_candidates.append({
                 "submission_id": submission_id,
                 "student_view_name": student_view_name,
@@ -570,28 +714,47 @@ def run_compare_rewritten_sql_on_answer_db(
                 "ambiguous_columns": "",
                 "raw_select_sql": "",
                 "rewritten_sql": "",
+                "raw_select_sql_path": file_paths["select_body_path"],
+                "rewritten_sql_path": file_paths["rewritten_path"],
                 "execution_status": "NOT_EXECUTED",
-                "execution_error": "Could not parse DDL to extract SELECT statement query body."
+                "execution_error": parse_error_msg or "Could not parse DDL to extract SELECT statement query body."
             })
             continue
-            
+
         # Rewrite query
         rw_res = rewrite_sql_query(raw_select_sql, table_map, column_map, config)
-        
+        rw_status = rw_res["status"]
+        rewritten_sql = rw_res.get("rewritten_sql", "")
+
+        # Write all .sql and .diff files
+        file_paths = _write_sql_files(
+            view_sql_dir, student_view_name,
+            raw_definition=raw_definition,
+            select_body=raw_select_sql,
+            rewritten_sql=rewritten_sql,
+            rewrite_status=rw_status,
+            rewrite_error=rw_res.get("error_message", ""),
+            unmapped_tables=rw_res.get("unmapped_tables", []),
+            unmapped_columns=rw_res.get("unmapped_columns", []),
+            ambiguous_columns=rw_res.get("ambiguous_columns", []),
+        )
+
         rewritten_candidates.append({
             "submission_id": submission_id,
             "student_view_name": student_view_name,
             "raw_sql_available": True,
             "parse_status": "VIEW_SQL_PARSE_SUCCESS",
-            "rewrite_status": rw_res["status"],
-            "safety_status": "VIEW_SQL_UNSAFE_REVIEW" if rw_res["status"] == "VIEW_SQL_UNSAFE_REVIEW" else "VIEW_SQL_SAFE",
+            "rewrite_status": rw_status,
+            "safety_status": "VIEW_SQL_UNSAFE_REVIEW" if rw_status == "VIEW_SQL_UNSAFE_REVIEW" else "VIEW_SQL_SAFE",
             "table_mappings_used": rw_res.get("table_mappings_used", []),
             "column_mappings_used": rw_res.get("column_mappings_used", []),
             "unmapped_tables": rw_res.get("unmapped_tables", []),
             "unmapped_columns": rw_res.get("unmapped_columns", []),
             "ambiguous_columns": rw_res.get("ambiguous_columns", []),
             "raw_select_sql": raw_select_sql,
-            "rewritten_sql": rw_res.get("rewritten_sql", ""),
+            "rewritten_sql": rewritten_sql,
+            "raw_select_sql_path": file_paths["select_body_path"],
+            "rewritten_sql_path": file_paths["rewritten_path"],
             "execution_status": "NOT_EXECUTED",
             "execution_error": rw_res.get("error_message", "")
         })
@@ -758,24 +921,28 @@ def run_compare_rewritten_sql_on_answer_db(
                 "execution_error": rc["execution_error"]
             })
             
-    # Save view_sql_rewrite_report.csv
+    # Save view_sql_rewrite_report.csv (updated schema includes raw_select_sql_path, rewritten_sql_path)
     rewrite_report_path = output_report_path.parent / "view_sql_rewrite_report.csv"
+    _REWRITE_REPORT_FIELDS = [
+        "submission_id", "student_view_name", "parse_status",
+        "rewrite_status", "safety_status",
+        "raw_select_sql", "rewritten_sql",
+        "raw_select_sql_path", "rewritten_sql_path",
+        "table_mappings_used", "column_mappings_used",
+        "unmapped_tables", "unmapped_columns", "ambiguous_columns",
+        "execution_status", "execution_error"
+    ]
     with open(rewrite_report_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "submission_id", "student_view_name", "raw_sql_available", "parse_status",
-            "rewrite_status", "safety_status", "table_mappings_used", "column_mappings_used",
-            "unmapped_tables", "unmapped_columns", "ambiguous_columns", "raw_select_sql",
-            "rewritten_sql", "execution_status", "execution_error"
-        ])
+        writer = csv.DictWriter(f, fieldnames=_REWRITE_REPORT_FIELDS)
         writer.writeheader()
         for rc in rewritten_candidates:
-            # Format mappings used as string lists
-            rc_out = {**rc}
-            rc_out["table_mappings_used"] = ";".join(rc["table_mappings_used"]) if isinstance(rc["table_mappings_used"], list) else rc["table_mappings_used"]
-            rc_out["column_mappings_used"] = ";".join(rc["column_mappings_used"]) if isinstance(rc["column_mappings_used"], list) else rc["column_mappings_used"]
-            rc_out["unmapped_tables"] = ";".join(rc["unmapped_tables"]) if isinstance(rc["unmapped_tables"], list) else rc["unmapped_tables"]
-            rc_out["unmapped_columns"] = ";".join(rc["unmapped_columns"]) if isinstance(rc["unmapped_columns"], list) else rc["unmapped_columns"]
-            rc_out["ambiguous_columns"] = ";".join(rc["ambiguous_columns"]) if isinstance(rc["ambiguous_columns"], list) else rc["ambiguous_columns"]
+            rc_out = {k: rc.get(k, "") for k in _REWRITE_REPORT_FIELDS}
+            # Format list fields as semicolon-separated strings
+            for list_field in ("table_mappings_used", "column_mappings_used",
+                               "unmapped_tables", "unmapped_columns", "ambiguous_columns"):
+                val = rc_out[list_field]
+                if isinstance(val, list):
+                    rc_out[list_field] = ";".join(str(x) for x in val)
             writer.writerow(rc_out)
             
     # Save view_candidate_match_report.csv

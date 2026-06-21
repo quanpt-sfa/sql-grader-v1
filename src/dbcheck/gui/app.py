@@ -633,6 +633,11 @@ class App:
             ("hard_errors.csv", "hard_errors.csv"),
             ("execution.log", "execution.log"),
             ("student_feedback Folder", "student_feedback"),
+            # Submission-dependent view SQL folders (resolved from selected student)
+            ("view_sql Folder", "view_sql:view_sql"),
+            ("view_sql/raw Folder", "view_sql:view_sql/raw"),
+            ("view_sql/rewritten Folder", "view_sql:view_sql/rewritten"),
+            ("view_sql/diff Folder", "view_sql:view_sql/diff"),
             ("Run Directory Root", "")
         ]
         self.file_widgets = []
@@ -832,6 +837,8 @@ class App:
             self.btn_open_reports.config(state="normal")
         else:
             self.btn_open_reports.config(state="disabled")
+        # Refresh files tab to update submission-dependent view_sql folder buttons
+        self._load_results_files_status()
 
     def _on_filter_changed(self, event=None):
         self._load_review_queue_data()
@@ -1471,15 +1478,40 @@ class App:
                 lbl_status.config(text="[Not generated]", foreground="gray")
                 btn_open.config(state="disabled")
             return
-            
+
         run_dir = REPO_ROOT / run_dir_str
-        
+
+        # Determine currently selected submission ID from the grading table (column 0)
+        selected_sub_id = ""
+        selected = self.tree.selection()
+        if selected:
+            row_values = self.tree.item(selected[0], "values")
+            if row_values:
+                selected_sub_id = str(row_values[0])
+
         for lbl_status, btn_open, subpath in self.file_widgets:
+            # Submission-dependent view_sql paths
+            if isinstance(subpath, str) and subpath.startswith("view_sql:"):
+                rel = subpath[len("view_sql:"):]
+                if not selected_sub_id:
+                    lbl_status.config(text="[Select student first]", foreground="gray")
+                    btn_open.config(state="disabled")
+                    continue
+                path = run_dir / "submissions" / selected_sub_id / rel
+                if path.exists():
+                    lbl_status.config(text="✔ Available", foreground="green")
+                    btn_open.config(state="normal", command=lambda p=path: self._safe_open_path(p))
+                else:
+                    lbl_status.config(text="[Not generated]", foreground="gray")
+                    btn_open.config(state="disabled")
+                continue
+
+            # Regular run-dir-relative paths
             if not subpath:
                 path = run_dir
             else:
                 path = run_dir / subpath
-                
+
             if path.exists():
                 lbl_status.config(text="✔ Available", foreground="green")
                 btn_open.config(state="normal", command=lambda p=path: self._safe_open_path(p))

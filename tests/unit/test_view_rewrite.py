@@ -381,3 +381,219 @@ def test_one_to_one_assignment_and_ambiguity(base_config_data, tmp_path):
     # Cau1 should get VIEW_MAPPING_AMBIGUOUS status.
     cau1_res = next(r for r in results if r["answer_view"] == "Cau1")
     assert cau1_res["status"] == "VIEW_MAPPING_AMBIGUOUS"
+
+
+# ---------------------------------------------------------------------------
+# SQL file export tests
+# ---------------------------------------------------------------------------
+
+def test_sql_files_written_on_success(base_config_data, tmp_path):
+    """Raw, select_body, rewritten, and diff SQL files are written on rewrite success."""
+    config = AssignmentConfig(base_config_data)
+
+    db_conn = MagicMock()
+    raw_ddl = "CREATE VIEW Cau1 AS SELECT c.PMH, c.TongTien FROM dbo.CT_MuaHang c"
+    db_conn.execute_query.return_value = [
+        {"view_name": "Cau1", "definition": raw_ddl}
+    ]
+    db_conn.execute_query_df.side_effect = [
+        pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]}),
+        pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]}),
+    ]
+
+    (tmp_path / "table_mapping_report.csv").write_text(
+        "student_table,answer_table,match_status\nCT_MuaHang,ChiTietMuaHang,TABLE_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "column_mapping_report.csv").write_text(
+        "student_table,student_column,answer_column,match_status\n"
+        "CT_MuaHang,PMH,PhieuMuaHang,COLUMN_MATCHED_EXACT\n"
+        "CT_MuaHang,TongTien,TongTien,COLUMN_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+
+    run_compare_rewritten_sql_on_answer_db(
+        db_conn=db_conn,
+        ans_db="ans_db",
+        stud_db="stud_db",
+        submission_id="sub1",
+        config=config,
+        expected_views=config.views,
+        output_report_path=tmp_path / "view_test_report.csv",
+        diff_dir=tmp_path / "diffs",
+        col_accept_threshold=0.88,
+        export_outputs=False,
+    )
+
+    view_sql_dir = tmp_path.parent / "view_sql"
+
+    raw_file = view_sql_dir / "raw" / "Cau1.sql"
+    body_file = view_sql_dir / "select_body" / "Cau1.sql"
+    rw_file = view_sql_dir / "rewritten" / "Cau1.sql"
+    diff_file = view_sql_dir / "diff" / "Cau1.diff.txt"
+
+    assert raw_file.exists(), f"Expected raw SQL file at {raw_file}"
+    assert body_file.exists(), f"Expected select_body SQL file at {body_file}"
+    assert rw_file.exists(), f"Expected rewritten SQL file at {rw_file}"
+    assert diff_file.exists(), f"Expected diff file at {diff_file}"
+
+    # raw file must contain the original DDL
+    raw_content = raw_file.read_text(encoding="utf-8")
+    assert "CREATE VIEW" in raw_content
+
+    # select_body file must not contain CREATE/ALTER VIEW wrapper
+    body_content = body_file.read_text(encoding="utf-8")
+    assert "CREATE VIEW" not in body_content
+    assert "SELECT" in body_content.upper()
+
+    # rewritten file must contain canonical table name (not failure comment)
+    rw_content = rw_file.read_text(encoding="utf-8")
+    assert "-- Rewrite failed" not in rw_content
+    assert "ChiTietMuaHang" in rw_content
+
+
+def test_sql_files_written_on_rewrite_failure(base_config_data, tmp_path):
+    """When rewrite fails, raw and diagnostic rewritten files are still written."""
+    config = AssignmentConfig(base_config_data)
+
+    db_conn = MagicMock()
+    # DDL references an unmapped table so rewrite will fail
+    raw_ddl = "CREATE VIEW Cau1 AS SELECT x.SomeCol FROM dbo.UnknownTable x"
+    db_conn.execute_query.return_value = [
+        {"view_name": "Cau1", "definition": raw_ddl}
+    ]
+    db_conn.execute_query_df.return_value = pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]})
+
+    (tmp_path / "table_mapping_report.csv").write_text(
+        "student_table,answer_table,match_status\n", encoding="utf-8"
+    )
+    (tmp_path / "column_mapping_report.csv").write_text(
+        "student_table,student_column,answer_column,match_status\n", encoding="utf-8"
+    )
+
+    run_compare_rewritten_sql_on_answer_db(
+        db_conn=db_conn,
+        ans_db="ans_db",
+        stud_db="stud_db",
+        submission_id="sub1",
+        config=config,
+        expected_views=config.views,
+        output_report_path=tmp_path / "view_test_report.csv",
+        diff_dir=tmp_path / "diffs",
+        col_accept_threshold=0.88,
+        export_outputs=False,
+    )
+
+    view_sql_dir = tmp_path.parent / "view_sql"
+    raw_file = view_sql_dir / "raw" / "Cau1.sql"
+    rw_file = view_sql_dir / "rewritten" / "Cau1.sql"
+    diff_file = view_sql_dir / "diff" / "Cau1.diff.txt"
+
+    assert raw_file.exists(), f"Expected raw SQL file even on failure: {raw_file}"
+    assert rw_file.exists(), f"Expected diagnostic rewritten file: {rw_file}"
+    assert diff_file.exists(), f"Expected diff file even on failure: {diff_file}"
+
+    rw_content = rw_file.read_text(encoding="utf-8")
+    assert "-- Rewrite failed" in rw_content
+    assert "-- Status:" in rw_content
+
+
+def test_rewrite_csv_contains_file_paths(base_config_data, tmp_path):
+    """view_sql_rewrite_report.csv must include raw_select_sql_path and rewritten_sql_path columns."""
+    import csv as csv_module
+
+    config = AssignmentConfig(base_config_data)
+
+    db_conn = MagicMock()
+    raw_ddl = "CREATE VIEW Cau1 AS SELECT c.PMH FROM dbo.CT_MuaHang c"
+    db_conn.execute_query.return_value = [
+        {"view_name": "Cau1", "definition": raw_ddl}
+    ]
+    db_conn.execute_query_df.side_effect = [
+        pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]}),
+        pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]}),
+    ]
+
+    (tmp_path / "table_mapping_report.csv").write_text(
+        "student_table,answer_table,match_status\nCT_MuaHang,ChiTietMuaHang,TABLE_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "column_mapping_report.csv").write_text(
+        "student_table,student_column,answer_column,match_status\n"
+        "CT_MuaHang,PMH,PhieuMuaHang,COLUMN_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+
+    run_compare_rewritten_sql_on_answer_db(
+        db_conn=db_conn,
+        ans_db="ans_db",
+        stud_db="stud_db",
+        submission_id="sub1",
+        config=config,
+        expected_views=config.views,
+        output_report_path=tmp_path / "view_test_report.csv",
+        diff_dir=tmp_path / "diffs",
+        col_accept_threshold=0.88,
+        export_outputs=False,
+    )
+
+    rewrite_report = tmp_path / "view_sql_rewrite_report.csv"
+    assert rewrite_report.exists()
+    with open(rewrite_report, "r", encoding="utf-8") as f:
+        rows = list(csv_module.DictReader(f))
+    assert rows, "view_sql_rewrite_report.csv is empty"
+    row = rows[0]
+    assert "raw_select_sql_path" in row, "Missing raw_select_sql_path column"
+    assert "rewritten_sql_path" in row, "Missing rewritten_sql_path column"
+    # Paths should be non-empty for a successful rewrite
+    assert row["raw_select_sql_path"], "raw_select_sql_path should not be empty"
+    assert row["rewritten_sql_path"], "rewritten_sql_path should not be empty"
+
+
+def test_extraction_csv_contains_raw_definition_path(base_config_data, tmp_path):
+    """view_sql_extraction_report.csv must include raw_definition_path column."""
+    import csv as csv_module
+
+    config = AssignmentConfig(base_config_data)
+
+    db_conn = MagicMock()
+    raw_ddl = "CREATE VIEW Cau1 AS SELECT c.PMH FROM dbo.CT_MuaHang c"
+    db_conn.execute_query.return_value = [
+        {"view_name": "Cau1", "definition": raw_ddl}
+    ]
+    db_conn.execute_query_df.side_effect = [
+        pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]}),
+        pd.DataFrame({"PhieuMuaHang": ["PMH01"], "TongTien": [100.0]}),
+    ]
+
+    (tmp_path / "table_mapping_report.csv").write_text(
+        "student_table,answer_table,match_status\nCT_MuaHang,ChiTietMuaHang,TABLE_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "column_mapping_report.csv").write_text(
+        "student_table,student_column,answer_column,match_status\n"
+        "CT_MuaHang,PMH,PhieuMuaHang,COLUMN_MATCHED_EXACT\n",
+        encoding="utf-8",
+    )
+
+    run_compare_rewritten_sql_on_answer_db(
+        db_conn=db_conn,
+        ans_db="ans_db",
+        stud_db="stud_db",
+        submission_id="sub1",
+        config=config,
+        expected_views=config.views,
+        output_report_path=tmp_path / "view_test_report.csv",
+        diff_dir=tmp_path / "diffs",
+        col_accept_threshold=0.88,
+        export_outputs=False,
+    )
+
+    extract_report = tmp_path / "view_sql_extraction_report.csv"
+    assert extract_report.exists()
+    with open(extract_report, "r", encoding="utf-8") as f:
+        rows = list(csv_module.DictReader(f))
+    assert rows, "view_sql_extraction_report.csv is empty"
+    row = rows[0]
+    assert "raw_definition_path" in row, "Missing raw_definition_path column"
+    assert row["raw_definition_path"], "raw_definition_path should not be empty for a found definition"
