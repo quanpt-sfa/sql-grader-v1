@@ -279,6 +279,85 @@ def get_view_columns(db_conn: SQLServerConnection, db_name: str, submission_id: 
     return view_cols
 
 
+def get_view_definitions(
+    db_conn: SQLServerConnection,
+    db_name: str,
+    submission_id: str,
+    role: str,
+    normalizer: NameNormalizer,
+) -> List[Dict[str, Any]]:
+    logger = get_logger()
+    sql = """
+    SELECT
+        s.name AS view_schema,
+        v.name AS view_name,
+        COALESCE(m.definition, OBJECT_DEFINITION(v.object_id)) AS raw_definition
+    FROM sys.views v
+    JOIN sys.schemas s ON v.schema_id = s.schema_id
+    LEFT JOIN sys.sql_modules m ON v.object_id = m.object_id
+    WHERE v.is_ms_shipped = 0;
+    """
+    results = []
+    try:
+        rows = db_conn.execute_query(sql, db_name=db_name)
+    except Exception as e:
+        logger.error(f"[{submission_id}] View definition extraction failed: {e}")
+        try:
+            rows = db_conn.execute_query(
+                """
+                SELECT s.name AS view_schema, v.name AS view_name
+                FROM sys.views v
+                JOIN sys.schemas s ON v.schema_id = s.schema_id
+                WHERE v.is_ms_shipped = 0;
+                """,
+                db_name=db_name,
+            )
+        except Exception as fallback_error:
+            logger.error(f"[{submission_id}] Fallback view list extraction failed: {fallback_error}")
+            return []
+
+        for r in rows:
+            view_name = r["view_name"]
+            try:
+                view_canon = normalizer.get_canonical_table(view_name)
+            except ValueError:
+                view_canon = "AMBIGUOUS_VIEW"
+            results.append({
+                "submission_id": submission_id,
+                "role": role,
+                "view_schema": r.get("view_schema", ""),
+                "view_name": view_name,
+                "view_name_canonical": view_canon,
+                "definition_found": False,
+                "raw_definition": "",
+                "raw_definition_path": "",
+                "extract_status": "VIEW_SQL_EXTRACTION_ERROR",
+                "extract_error": str(e),
+            })
+        return results
+
+    for r in rows:
+        view_name = r["view_name"]
+        raw_definition = r.get("raw_definition") or ""
+        try:
+            view_canon = normalizer.get_canonical_table(view_name)
+        except ValueError:
+            view_canon = "AMBIGUOUS_VIEW"
+        results.append({
+            "submission_id": submission_id,
+            "role": role,
+            "view_schema": r.get("view_schema", ""),
+            "view_name": view_name,
+            "view_name_canonical": view_canon,
+            "definition_found": bool(raw_definition),
+            "raw_definition": raw_definition,
+            "raw_definition_path": "",
+            "extract_status": "VIEW_SQL_EXTRACTED" if raw_definition else "VIEW_SQL_DEFINITION_MISSING",
+            "extract_error": "",
+        })
+    return results
+
+
 def get_unique_constraints(db_conn: SQLServerConnection, db_name: str, submission_id: str, normalizer: NameNormalizer) -> List[Dict[str, Any]]:
     sql = """
     SELECT 
@@ -316,4 +395,3 @@ def get_unique_constraints(db_conn: SQLServerConnection, db_name: str, submissio
             "key_ordinal": r["key_ordinal"]
         })
     return uniques
-

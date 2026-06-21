@@ -141,6 +141,9 @@ class SqlRewriteConfig:
         self.allow_weak_column_aliases: bool = bool(data.get("allow_weak_column_aliases", False))
         self.allow_weak_table_aliases: bool = bool(data.get("allow_weak_table_aliases", False))
         self.max_execution_seconds: int = int(data.get("max_execution_seconds", 10))
+        self.use_snapshot_view_definitions: bool = bool(data.get("use_snapshot_view_definitions", True))
+        self.restore_student_db_fallback: bool = bool(data.get("restore_student_db_fallback", False))
+        self.restore_answer_once_per_run: bool = bool(data.get("restore_answer_once_per_run", True))
 
 
 class AssignmentConfig:

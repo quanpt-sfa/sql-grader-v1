@@ -579,7 +579,8 @@ def run_compare_rewritten_sql_on_answer_db(
     output_report_path: Path,
     diff_dir: Path,
     col_accept_threshold: float,
-    export_outputs: bool
+    export_outputs: bool,
+    student_view_definitions: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     logger = get_logger()
     output_report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -589,8 +590,21 @@ def run_compare_rewritten_sql_on_answer_db(
     view_sql_dir = output_report_path.parent.parent / "view_sql"
     view_sql_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Extract student views DDL, writing raw/*.sql files
-    extracted_views = extract_student_views(db_conn, stud_db, submission_id, sql_dir=view_sql_dir)
+    # 1. Use snapshot view DDL when provided; otherwise keep the legacy live extraction path.
+    extracted_views = []
+    if student_view_definitions is not None:
+        for row in student_view_definitions:
+            extracted_views.append({
+                "submission_id": submission_id,
+                "student_view_name": row.get("student_view_name") or row.get("view_name", ""),
+                "definition_found": str(row.get("definition_found", "")).lower() in ("true", "1", "yes") or bool(row.get("raw_definition")),
+                "raw_definition": row.get("raw_definition", ""),
+                "raw_definition_path": row.get("raw_definition_path", ""),
+                "extract_status": row.get("extract_status", ""),
+                "extract_error": row.get("extract_error", ""),
+            })
+    else:
+        extracted_views = extract_student_views(db_conn, stud_db, submission_id, sql_dir=view_sql_dir)
     
     # Write view_sql_extraction_report.csv (updated schema with raw_definition_path)
     extract_report_path = output_report_path.parent / "view_sql_extraction_report.csv"
@@ -1094,6 +1108,7 @@ def run_view_testing(
     output_report_path: Path,
     diff_dir: Path,
     ans_view_cols_snap: Optional[List[Dict[str, Any]]] = None,
+    student_view_definitions: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Execute and compare student views.  Mode is determined by config.execution_mode."""
     logger = get_logger()
@@ -1115,7 +1130,8 @@ def run_view_testing(
         return run_compare_rewritten_sql_on_answer_db(
             db_conn, ans_db, stud_db, submission_id, config,
             expected_views, output_report_path, diff_dir,
-            col_accept_threshold, export_outputs
+            col_accept_threshold, export_outputs,
+            student_view_definitions=student_view_definitions,
         )
 
     # Build student view lookup: canonical → [physical_name, ...]

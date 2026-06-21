@@ -21,7 +21,9 @@ from typing import Dict, Any, List
 from dbcheck.config import load_config
 from dbcheck.sqlserver.connection import SQLServerConnection
 from dbcheck.sqlserver.restore import restore_database, drop_database, get_sql_data_dir
+from dbcheck.sqlserver.introspection import get_view_definitions
 from dbcheck.snapshot.reader import read_full_snapshot
+from dbcheck.snapshot.writer import write_snapshot_csv, write_view_sql_files
 from dbcheck.snapshot.normalizer import NameNormalizer
 from dbcheck.views.view_reporter import run_view_testing
 from dbcheck.utils.manifest import ManifestManager
@@ -204,6 +206,78 @@ def _write_view_execution_error_report(report_path: Path, sub_id: str, ans_snap:
             })
 
 
+def _write_missing_view_definitions_reports(report_path: Path, sub_id: str, ans_snap: Dict[str, Any], config: Any):
+    message = (
+        "Mapped-SQL view grading requires snapshot/view_definitions.csv. "
+        "Re-run snapshot with view SQL extraction enabled."
+    )
+    report_dir = report_path.parent
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(report_dir / "view_sql_extraction_report.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "student_view_name", "definition_found",
+            "raw_definition", "raw_definition_path", "extract_status", "extract_error"
+        ])
+        writer.writeheader()
+        writer.writerow({
+            "submission_id": sub_id,
+            "student_view_name": "",
+            "definition_found": False,
+            "raw_definition": "",
+            "raw_definition_path": "",
+            "extract_status": "VIEW_SQL_DEFINITION_MISSING",
+            "extract_error": message,
+        })
+
+    with open(report_dir / "view_sql_rewrite_report.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "student_view_name", "parse_status",
+            "rewrite_status", "safety_status", "raw_select_sql", "rewritten_sql",
+            "raw_select_sql_path", "rewritten_sql_path", "table_mappings_used",
+            "column_mappings_used", "unmapped_tables", "unmapped_columns",
+            "ambiguous_columns", "execution_status", "execution_error"
+        ])
+        writer.writeheader()
+
+    with open(report_dir / "view_candidate_match_report.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "expected_view", "student_view_candidate",
+            "student_view_name_hint_score", "parse_status", "rewrite_status",
+            "safety_status", "execution_status", "schema_score", "row_count_score",
+            "value_score", "order_score", "total_match_score", "candidate_status", "reason"
+        ])
+        writer.writeheader()
+
+    from dbcheck.views.view_reporter import _resolve_expected_views
+    expected_views = _resolve_expected_views(
+        config,
+        ans_snap.get("views", []),
+        ans_snap.get("view_columns", []),
+    )
+    with open(report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "submission_id", "answer_view", "student_view", "matched_student_view",
+            "match_method", "status", "matched_columns", "missing_columns",
+            "extra_columns", "row_count_answer", "row_count_student", "schema_score",
+            "row_count_score", "value_score", "order_score", "total_match_score",
+            "answer_minus_student_count", "student_minus_answer_count",
+            "value_mismatch_count", "order_mismatch_count", "execution_error", "reason"
+        ])
+        writer.writeheader()
+        for view_cfg in expected_views:
+            writer.writerow({
+                "submission_id": sub_id,
+                "answer_view": view_cfg.answer_view,
+                "student_view": "",
+                "matched_student_view": "",
+                "match_method": "snapshot_view_definitions",
+                "status": "VIEW_SQL_DEFINITION_MISSING",
+                "execution_error": message,
+                "reason": message,
+            })
+
+
 # ---------------------------------------------------------------------------
 # Main command
 # ---------------------------------------------------------------------------
@@ -299,10 +373,26 @@ def run_test_views(args):
     normalizer = NameNormalizer(config)
 
     # --- Global try block to catch any top-level errors ---
+    mapped_mode = execution_mode == "compare_rewritten_sql_on_answer_db"
+    mapped_answer_db: str | None = None
+    mapped_temp_bak_to_clean: Path | None = None
     try:
         ok_count = 0
         total_count = 0
         manifest = ManifestManager(run_dir)
+
+        if mapped_mode and config.sql_rewrite.restore_answer_once_per_run:
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            mapped_answer_db = f"grade_tmp_answer_{run_id}"
+            logger.info("Restoring answer database once for mapped-SQL view grading")
+            if answer_bak_path and answer_bak_path.exists():
+                restore_database(db_conn, answer_bak_path, mapped_answer_db)
+            else:
+                try:
+                    mapped_temp_bak_to_clean = _create_copy_only_backup(db_conn, protected_db, run_id)
+                    restore_database(db_conn, mapped_temp_bak_to_clean, mapped_answer_db)
+                except Exception as fb_err:
+                    raise RuntimeError(f"Fallback answer DB copy failed: {fb_err}")
 
         for sub in submissions:
             sub_id = sub["submission_id"]
@@ -322,51 +412,86 @@ def run_test_views(args):
 
             run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             temp_stud_db = f"grade_tmp_{sub_id}_{run_id}"
-            temp_answer_db = f"grade_tmp_answer_{run_id}"
+            temp_answer_db = mapped_answer_db or f"grade_tmp_answer_{run_id}"
             temp_bak_to_clean: Path | None = None
 
             logger.info(f"Testing view behavior for student '{sub_id}'...")
 
             try:
-                # Restore answer DB
-                if answer_bak_path and answer_bak_path.exists():
-                    restore_database(db_conn, answer_bak_path, temp_answer_db)
+                if mapped_mode:
+                    student_view_definitions = stud_snap.get("view_definitions", [])
+                    if not student_view_definitions:
+                        if not config.sql_rewrite.restore_student_db_fallback:
+                            logger.warning(f"VIEW_SQL_DEFINITION_MISSING: {sub_id}")
+                            _write_missing_view_definitions_reports(report_path, sub_id, ans_snap, config)
+                            manifest.update(
+                                submission_id=sub_id,
+                                source_path=bak_file,
+                                status=status,
+                                error_code="",
+                                error_message="",
+                            )
+                            continue
+
+                        logger.info(f"RESTORE_FALLBACK_USED_FOR_VIEW_SQL_EXTRACTION: {sub_id}")
+                        try:
+                            restore_database(db_conn, bak_file, temp_stud_db)
+                            student_view_definitions = get_view_definitions(
+                                db_conn, temp_stud_db, sub_id, "student", normalizer
+                            )
+                            write_view_sql_files(student_snapshot_dir, student_view_definitions)
+                            write_snapshot_csv(student_snapshot_dir, "view_definitions", student_view_definitions)
+                            stud_snap["view_definitions"] = student_view_definitions
+                        finally:
+                            try:
+                                drop_database(db_conn, temp_stud_db)
+                            except Exception:
+                                pass
+
+                    logger.info(f"Using snapshot view definitions for {sub_id}; student restore skipped")
+                    run_view_testing(
+                        db_conn, temp_answer_db, "", sub_id, config,
+                        ans_snap["views"], stud_snap["views"], stud_snap["columns"],
+                        report_path, diff_dir,
+                        ans_view_cols_snap=ans_snap.get("view_columns", []),
+                        student_view_definitions=student_view_definitions,
+                    )
                 else:
-                    try:
-                        temp_bak_to_clean = _create_copy_only_backup(db_conn, protected_db, run_id)
-                        restore_database(db_conn, temp_bak_to_clean, temp_answer_db)
-                    except Exception as fb_err:
-                        raise RuntimeError(f"Fallback answer DB copy failed: {fb_err}")
+                    if answer_bak_path and answer_bak_path.exists():
+                        restore_database(db_conn, answer_bak_path, temp_answer_db)
+                    else:
+                        try:
+                            temp_bak_to_clean = _create_copy_only_backup(db_conn, protected_db, run_id)
+                            restore_database(db_conn, temp_bak_to_clean, temp_answer_db)
+                        except Exception as fb_err:
+                            raise RuntimeError(f"Fallback answer DB copy failed: {fb_err}")
 
-                # Restore student DB
-                restore_database(db_conn, bak_file, temp_stud_db)
+                    restore_database(db_conn, bak_file, temp_stud_db)
 
-                # Seed only in seeded mode
-                if execution_mode == "compare_seeded_test_data":
-                    from dbcheck.sqlserver.test_data_loader import seed_database
-                    logger.info("Seeding temporary databases...")
-                    seed_defaults_path = (
-                        run_dir / "submissions" / sub_id / "reports" / "seeding_synthetic_defaults.csv"
-                    )
-                    seed_database(
-                        db_conn, temp_answer_db, test_data_dir,
-                        ans_snap["tables"], ans_snap["columns"], ans_snap["foreign_keys"], normalizer,
-                    )
-                    seed_database(
-                        db_conn, temp_stud_db, test_data_dir,
-                        stud_snap["tables"], stud_snap["columns"], stud_snap["foreign_keys"], normalizer,
-                        synthetic_defaults_report_path=seed_defaults_path,
-                    )
-                else:
-                    logger.info("compare_existing_data mode: skipping seeding.")
+                    if execution_mode == "compare_seeded_test_data":
+                        from dbcheck.sqlserver.test_data_loader import seed_database
+                        logger.info("Seeding temporary databases...")
+                        seed_defaults_path = (
+                            run_dir / "submissions" / sub_id / "reports" / "seeding_synthetic_defaults.csv"
+                        )
+                        seed_database(
+                            db_conn, temp_answer_db, test_data_dir,
+                            ans_snap["tables"], ans_snap["columns"], ans_snap["foreign_keys"], normalizer,
+                        )
+                        seed_database(
+                            db_conn, temp_stud_db, test_data_dir,
+                            stud_snap["tables"], stud_snap["columns"], stud_snap["foreign_keys"], normalizer,
+                            synthetic_defaults_report_path=seed_defaults_path,
+                        )
+                    else:
+                        logger.info("compare_existing_data mode: skipping seeding.")
 
-                # Compare views
-                run_view_testing(
-                    db_conn, temp_answer_db, temp_stud_db, sub_id, config,
-                    ans_snap["views"], stud_snap["views"], stud_snap["columns"],
-                    report_path, diff_dir,
-                    ans_view_cols_snap=ans_snap.get("view_columns", []),
-                )
+                    run_view_testing(
+                        db_conn, temp_answer_db, temp_stud_db, sub_id, config,
+                        ans_snap["views"], stud_snap["views"], stud_snap["columns"],
+                        report_path, diff_dir,
+                        ans_view_cols_snap=ans_snap.get("view_columns", []),
+                    )
 
                 manifest.update(
                     submission_id=sub_id,
@@ -390,16 +515,17 @@ def run_test_views(args):
                 )
 
             finally:
-                for db in (temp_stud_db, temp_answer_db):
-                    try:
-                        drop_database(db_conn, db)
-                    except Exception:
-                        pass
-                if temp_bak_to_clean and temp_bak_to_clean.exists():
-                    try:
-                        os.remove(temp_bak_to_clean)
-                    except Exception:
-                        pass
+                if not mapped_mode:
+                    for db in (temp_stud_db, temp_answer_db):
+                        try:
+                            drop_database(db_conn, db)
+                        except Exception:
+                            pass
+                    if temp_bak_to_clean and temp_bak_to_clean.exists():
+                        try:
+                            os.remove(temp_bak_to_clean)
+                        except Exception:
+                            pass
 
         logger.info(f"View testing complete: {ok_count}/{total_count} submissions OK.")
         compile_summary(run_dir)
@@ -409,6 +535,18 @@ def run_test_views(args):
         logger.error(f"Global view-testing command error: {global_err}")
         _write_command_error_summary(run_dir, submissions, answer_view_count, str(global_err))
         raise
+    finally:
+        if mapped_answer_db:
+            logger.info("Dropping temporary answer database after all mapped-SQL view grading is complete")
+            try:
+                drop_database(db_conn, mapped_answer_db)
+            except Exception:
+                pass
+        if mapped_temp_bak_to_clean and mapped_temp_bak_to_clean.exists():
+            try:
+                os.remove(mapped_temp_bak_to_clean)
+            except Exception:
+                pass
 
     # 9. Optional protected DB post-run audit
     post_counts = _try_protected_db_audit(db_conn, protected_db, "post-run")

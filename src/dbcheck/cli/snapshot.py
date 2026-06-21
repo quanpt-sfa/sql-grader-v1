@@ -8,12 +8,36 @@ from dbcheck.sqlserver.restore import restore_database, drop_database
 from dbcheck.sqlserver.safety import check_quarantine, extract_submission_id
 from dbcheck.sqlserver.introspection import (
     get_tables, get_columns, get_primary_keys, get_foreign_keys, get_views, get_view_columns,
-    get_unique_constraints
+    get_unique_constraints, get_view_definitions
 )
 from dbcheck.snapshot.writer import write_full_snapshot
 from dbcheck.snapshot.normalizer import NameNormalizer
 from dbcheck.utils.manifest import ManifestManager
 from dbcheck.utils.logging import get_logger
+
+def _extract_full_snapshot(db_conn, db_name, submission_id, role, normalizer):
+    logger = get_logger()
+    snapshot = {}
+    extraction_errors = []
+    extractors = [
+        ("tables", lambda: get_tables(db_conn, db_name, submission_id, role, normalizer)),
+        ("columns", lambda: get_columns(db_conn, db_name, submission_id, normalizer)),
+        ("primary_keys", lambda: get_primary_keys(db_conn, db_name, submission_id, normalizer)),
+        ("foreign_keys", lambda: get_foreign_keys(db_conn, db_name, submission_id, normalizer)),
+        ("views", lambda: get_views(db_conn, db_name, submission_id, normalizer)),
+        ("view_columns", lambda: get_view_columns(db_conn, db_name, submission_id, normalizer)),
+        ("unique_constraints", lambda: get_unique_constraints(db_conn, db_name, submission_id, normalizer)),
+        ("view_definitions", lambda: get_view_definitions(db_conn, db_name, submission_id, role, normalizer)),
+    ]
+    for key, extractor in extractors:
+        try:
+            snapshot[key] = extractor()
+        except Exception as e:
+            message = f"{key}: {e}"
+            logger.error(f"[{submission_id}] Snapshot extraction failed for {message}")
+            extraction_errors.append(message)
+            snapshot[key] = []
+    return snapshot, extraction_errors
 
 def run_snapshot(args):
     logger = get_logger()
@@ -61,24 +85,22 @@ def run_snapshot(args):
         # Instantiating the normalizer (uses configuration alias mappings)
         normalizer = NameNormalizer(config)
         
-        # Extrospect schemas of answer database
-        logger.info(f"Extracting answer snapshot from '{answer_db_name}'...")
-        answer_snap = {
-            "tables": get_tables(db_conn, answer_db_name, "answer", "answer", normalizer),
-            "columns": get_columns(db_conn, answer_db_name, "answer", normalizer),
-            "primary_keys": get_primary_keys(db_conn, answer_db_name, "answer", normalizer),
-            "foreign_keys": get_foreign_keys(db_conn, answer_db_name, "answer", normalizer),
-            "views": get_views(db_conn, answer_db_name, "answer", normalizer),
-            "view_columns": get_view_columns(db_conn, answer_db_name, "answer", normalizer),
-            "unique_constraints": get_unique_constraints(db_conn, answer_db_name, "answer", normalizer)
-        }
+        # Extract schemas of answer database
+        logger.info(f"Extracting schema and view definitions for answer")
+        answer_snap, answer_errors = _extract_full_snapshot(
+            db_conn, answer_db_name, "answer", "answer", normalizer
+        )
+        if answer_errors:
+            logger.error(f"Answer snapshot had extraction errors: {' | '.join(answer_errors)}")
         
+        logger.info("Writing snapshot artifacts for answer")
         write_full_snapshot(answer_snap_dir, answer_snap)
         logger.info(f"Answer snapshot written to: {answer_snap_dir}")
         
     finally:
         # Clean up temporary answer database
         if temp_answer_db:
+            logger.info(f"Dropping temporary answer database {temp_answer_db}")
             try:
                 drop_database(db_conn, temp_answer_db)
             except Exception as e:
@@ -137,42 +159,41 @@ def run_snapshot(args):
         
         try:
             # Restore student database
+            logger.info(f"Restoring student database {sub_id}")
             restore_database(db_conn, bak_file, temp_stud_db)
             
             # Extract schemas
+            logger.info(f"Extracting schema and view definitions for {sub_id}")
             student_snap_dir = run_dir / "submissions" / sub_id / "snapshot"
-            student_snap = {
-                "tables": get_tables(db_conn, temp_stud_db, sub_id, "student", normalizer),
-                "columns": get_columns(db_conn, temp_stud_db, sub_id, normalizer),
-                "primary_keys": get_primary_keys(db_conn, temp_stud_db, sub_id, normalizer),
-                "foreign_keys": get_foreign_keys(db_conn, temp_stud_db, sub_id, normalizer),
-                "views": get_views(db_conn, temp_stud_db, sub_id, normalizer),
-                "view_columns": get_view_columns(db_conn, temp_stud_db, sub_id, normalizer),
-                "unique_constraints": get_unique_constraints(db_conn, temp_stud_db, sub_id, normalizer)
-            }
-            
-            write_full_snapshot(student_snap_dir, student_snap)
-            
-            # Clean up
-            drop_database(db_conn, temp_stud_db)
-            
-            manifest.update(
-                submission_id=sub_id,
-                source_path=bak_file,
-                status="OK",
-                finished_at=datetime.now()
+            student_snap, extraction_errors = _extract_full_snapshot(
+                db_conn, temp_stud_db, sub_id, "student", normalizer
             )
-            logger.info(f"Successfully processed submission '{sub_id}'")
+            
+            logger.info(f"Writing snapshot artifacts for {sub_id}")
+            write_full_snapshot(student_snap_dir, student_snap)
+
+            if extraction_errors:
+                manifest.update(
+                    submission_id=sub_id,
+                    source_path=bak_file,
+                    status="ERROR",
+                    error_code="SNAPSHOT_EXTRACTION_PARTIAL",
+                    error_message=" | ".join(extraction_errors),
+                    finished_at=datetime.now()
+                )
+                logger.error(f"Processed submission '{sub_id}' with extraction errors")
+            else:
+                manifest.update(
+                    submission_id=sub_id,
+                    source_path=bak_file,
+                    status="OK",
+                    finished_at=datetime.now()
+                )
+                logger.info(f"Successfully processed submission '{sub_id}'")
             
         except Exception as e:
             err_msg = str(e)
             logger.error(f"Error processing submission '{sub_id}': {err_msg}")
-            
-            # Attempt to clean up database in case of failure
-            try:
-                drop_database(db_conn, temp_stud_db)
-            except Exception:
-                pass
                 
             manifest.update(
                 submission_id=sub_id,
@@ -182,5 +203,11 @@ def run_snapshot(args):
                 error_message=err_msg,
                 finished_at=datetime.now()
             )
+        finally:
+            logger.info(f"Dropping temporary student database {temp_stud_db}")
+            try:
+                drop_database(db_conn, temp_stud_db)
+            except Exception:
+                pass
             
     logger.info("Snapshot extraction completed for all submissions.")

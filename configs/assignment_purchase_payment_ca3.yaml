@@ -140,6 +140,9 @@ views:
     execute_on_answer_db: true
     allow_weak_column_aliases: false
     allow_weak_table_aliases: false
+    use_snapshot_view_definitions: true
+    restore_student_db_fallback: false
+    restore_answer_once_per_run: true
     max_execution_seconds: 10
   expected:
   - answer_view: "Cau1"
@@ -210,5 +213,4 @@ scoring:
   copy_rubric_to_run: true
   run_rubric_filename: "rubric_used.csv"
   manual_overrides_filename: "manual_overrides.csv"
-
 
