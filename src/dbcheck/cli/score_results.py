@@ -53,9 +53,13 @@ def run_score_results(args):
             )
             
     # Resolve overrides path
+    manual_overrides_filename = "manual_overrides.csv"
+    if getattr(config, "scoring", None) and config.scoring.manual_overrides_filename:
+        manual_overrides_filename = config.scoring.manual_overrides_filename
+        
     overrides_path = Path(args.overrides) if args.overrides else None
     if not overrides_path:
-        run_overrides = run_dir / "manual_overrides.csv"
+        run_overrides = run_dir / manual_overrides_filename
         if run_overrides.exists():
             overrides_path = run_overrides
             
@@ -111,32 +115,43 @@ def run_score_results(args):
             detail_rows.append(d)
             
     # 6. Save reports
-    # A. Copy / save rubric to run_dir
-    rubric_used_dest = run_dir / "rubric_used.csv"
-    with open(rubric_used_dest, "w", newline="", encoding="utf-8") as f:
-        headers = ["section", "component", "scope", "object_name", "total_points", "scoring_mode", "include_statuses", "partial_policy", "notes"]
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        for row in rubric:
-            out_row = {k: row.get(k, "") for k in headers}
-            writer.writerow(out_row)
-            
-    # Compute SHA256 of rubric_used.csv
-    sha256_hash = hashlib.sha256()
-    with open(rubric_used_dest, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    rubric_sha256 = sha256_hash.hexdigest()
-    
-    # Write rubric_used.sha256
-    sha_dest = run_dir / "rubric_used.sha256"
-    with open(sha_dest, "w", encoding="utf-8") as f:
-        f.write(rubric_sha256)
+    run_rubric_filename = "rubric_used.csv"
+    copy_rubric_to_run = True
+    if getattr(config, "scoring", None):
+        if config.scoring.run_rubric_filename:
+            run_rubric_filename = config.scoring.run_rubric_filename
+        copy_rubric_to_run = config.scoring.copy_rubric_to_run
+        
+    rubric_sha256 = ""
+    if rubric_path.exists():
+        sha256_hash = hashlib.sha256()
+        with open(rubric_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        rubric_sha256 = sha256_hash.hexdigest()
+        
+    rubric_used_dest = None
+    if copy_rubric_to_run:
+        rubric_used_dest = run_dir / run_rubric_filename
+        with open(rubric_used_dest, "w", newline="", encoding="utf-8") as f:
+            headers = ["section", "component", "scope", "object_name", "total_points", "scoring_mode", "include_statuses", "partial_policy", "notes"]
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in rubric:
+                out_row = {k: row.get(k, "") for k in headers}
+                writer.writerow(out_row)
+                
+        sha_filename = Path(run_rubric_filename).stem + ".sha256"
+        sha_dest = run_dir / sha_filename
+        with open(sha_dest, "w", encoding="utf-8") as f:
+            f.write(rubric_sha256)
+    else:
+        logger.info("Scoring config has copy_rubric_to_run=False. Rubric will not be copied to run directory.")
         
     # Write scoring_metadata.json
     metadata = {
         "rubric_source_path": str(rubric_source_path) if rubric_source_path else "",
-        "rubric_used_path": str(rubric_used_dest),
+        "rubric_used_path": str(rubric_used_dest) if rubric_used_dest else "",
         "rubric_sha256": rubric_sha256,
         "manual_overrides_path": str(overrides_path) if overrides_path else "",
         "scored_at": datetime.now().isoformat()

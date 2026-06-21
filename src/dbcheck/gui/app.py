@@ -2312,18 +2312,21 @@ class App:
                     return
                 run_dir = REPO_ROOT / run_dir_str
                 run_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = run_dir / "rubric_used.csv"
+                
+                run_rubric_filename = config.scoring.run_rubric_filename or "rubric_used.csv"
+                dest_path = run_dir / run_rubric_filename
                 import shutil
                 shutil.copy2(src_path, dest_path)
                 
-                # Compute SHA256 of rubric_used.csv
+                # Compute SHA256 of rubric
                 import hashlib
                 sha256_hash = hashlib.sha256()
                 with open(dest_path, "rb") as f:
                     for byte_block in iter(lambda: f.read(4096), b""):
                         sha256_hash.update(byte_block)
                 sha256_val = sha256_hash.hexdigest()
-                with open(run_dir / "rubric_used.sha256", "w", encoding="utf-8") as f:
+                sha_filename = Path(run_rubric_filename).stem + ".sha256"
+                with open(run_dir / sha_filename, "w", encoding="utf-8") as f:
                     f.write(sha256_val)
                     
                 messagebox.showinfo("Success", f"Rubric copied successfully to {dest_path.name}")
@@ -2336,14 +2339,25 @@ class App:
 
     def _open_rubric_used(self):
         run_dir_str = self.run_dir_var.get().strip()
+        cfg_path_str = self.config_var.get().strip()
         if not run_dir_str:
             messagebox.showerror("Error", "Run directory path is empty.")
             return
-        path = REPO_ROOT / run_dir_str / "rubric_used.csv"
+            
+        run_rubric_filename = "rubric_used.csv"
+        if cfg_path_str:
+            try:
+                config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+                if getattr(config, "scoring", None) and config.scoring.run_rubric_filename:
+                    run_rubric_filename = config.scoring.run_rubric_filename
+            except Exception:
+                pass
+                
+        path = REPO_ROOT / run_dir_str / run_rubric_filename
         if path.exists():
             self._safe_open_path(path)
         else:
-            messagebox.showerror("Error", f"rubric_used.csv not found in: {path.parent}")
+            messagebox.showerror("Error", f"{run_rubric_filename} not found in: {path.parent}")
 
     def _update_rubric_info_ui(self):
         cfg_path_str = self.config_var.get().strip()
@@ -2373,7 +2387,16 @@ class App:
             self.lbl_rubric_status.config(text="Status: -")
             
         if run_dir_str:
-            sha_file = REPO_ROOT / run_dir_str / "rubric_used.sha256"
+            run_rubric_filename = "rubric_used.csv"
+            if cfg_path_str:
+                try:
+                    config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+                    if getattr(config, "scoring", None) and config.scoring.run_rubric_filename:
+                        run_rubric_filename = config.scoring.run_rubric_filename
+                except Exception:
+                    pass
+            sha_filename = Path(run_rubric_filename).stem + ".sha256"
+            sha_file = REPO_ROOT / run_dir_str / sha_filename
             if sha_file.exists():
                 try:
                     sha_val = sha_file.read_text(encoding="utf-8").strip()
@@ -2433,6 +2456,17 @@ class App:
         for item in selected:
             self.overrides_tree.delete(item)
 
+    def _get_manual_overrides_filename(self):
+        cfg_path_str = self.config_var.get().strip()
+        if cfg_path_str:
+            try:
+                config = load_config(str(REPO_ROOT / cfg_path_str if not Path(cfg_path_str).is_absolute() else cfg_path_str))
+                if getattr(config, "scoring", None) and config.scoring.manual_overrides_filename:
+                    return config.scoring.manual_overrides_filename
+            except Exception:
+                pass
+        return "manual_overrides.csv"
+
     def _save_manual_overrides(self):
         run_dir_str = self.run_dir_var.get().strip()
         if not run_dir_str:
@@ -2440,7 +2474,8 @@ class App:
             return
         run_dir = REPO_ROOT / run_dir_str
         run_dir.mkdir(parents=True, exist_ok=True)
-        overrides_csv = run_dir / "manual_overrides.csv"
+        overrides_filename = self._get_manual_overrides_filename()
+        overrides_csv = run_dir / overrides_filename
         
         try:
             with open(overrides_csv, "w", newline="", encoding="utf-8") as f:
@@ -2525,7 +2560,8 @@ class App:
         if not run_dir_str:
             return
             
-        overrides_csv = REPO_ROOT / run_dir_str / "manual_overrides.csv"
+        overrides_filename = self._get_manual_overrides_filename()
+        overrides_csv = REPO_ROOT / run_dir_str / overrides_filename
         if not overrides_csv.exists():
             return
             
