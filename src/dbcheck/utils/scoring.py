@@ -467,6 +467,13 @@ def score_submission(
                     expected = [fk for fk in expected_all if scope in fk]
                 else:
                     expected = [item for item in expected_all if item == scope]
+
+        if comp == "primary_keys":
+            pk_statuses = sub_statuses.get("primary_keys", {})
+            if scope.lower() == "all" and pk_statuses:
+                expected = list(pk_statuses.keys())
+            elif scope.lower() != "all" and pk_statuses and not expected:
+                expected = [item for item in pk_statuses.keys() if item == scope]
                     
         # 2. Evaluate point outcomes
         orig_points = 0.0

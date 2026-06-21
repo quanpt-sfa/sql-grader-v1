@@ -380,6 +380,107 @@ def test_rubric_csv_is_source_of_truth_without_manual_part_c(tmp_path, mock_conf
     assert cau1["original_points_awarded"] == 1.0
 
 
+def _pk_rubric_row():
+    return [{
+        "section": "A.1",
+        "component": "primary_keys",
+        "scope": "all",
+        "object_name": "",
+        "total_points": 1.0,
+        "scoring_mode": "proportional",
+        "include_statuses": "PK_MATCH_EXACT|PK_MATCH_ALIAS_EQUIVALENT|PK_SURROGATE_ACCEPTED|PK_NATURAL_ACCEPTED",
+        "partial_policy": "review_pending",
+        "notes": "",
+    }]
+
+
+def _write_key_adequacy_report(run_dir, sub_id, rows):
+    reports_dir = run_dir / "submissions" / sub_id / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    with open(reports_dir / "key_adequacy_report.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["table_name", "key_status"])
+        writer.writeheader()
+        for table_name, key_status in rows:
+            writer.writerow({"table_name": table_name, "key_status": key_status})
+
+
+def test_primary_key_scoring_uses_key_adequacy_report_denominator(tmp_path, mock_config_file):
+    config = load_config(str(mock_config_file))
+    rows = [
+        ("T1", "PK_MATCH_EXACT"),
+        ("T2", "PK_MATCH_ALIAS_EQUIVALENT"),
+        ("T3", "PK_SURROGATE_ACCEPTED"),
+        ("T4", "PK_NATURAL_ACCEPTED"),
+        ("T5", "PK_MATCH_EXACT"),
+        ("T6", "PK_MATCH_ALIAS_EQUIVALENT"),
+        ("T7", "PK_MISSING"),
+        ("T8", "PK_MISSING"),
+    ]
+    _write_key_adequacy_report(tmp_path, "sub1", rows)
+
+    details, total_score, rev_count, _err_count = score_submission(
+        "sub1", "OK", tmp_path, config, _pk_rubric_row(), [], {"primary_keys": []}
+    )
+
+    assert total_score == pytest.approx(6 / 8)
+    assert details[0]["status"] != "NO_ITEMS"
+    assert details[0]["message"] == "Passed 6/8 items"
+    assert details[0]["review_required"] is False
+    assert rev_count == 0
+
+
+def test_primary_key_review_required_sets_review_pending(tmp_path, mock_config_file):
+    config = load_config(str(mock_config_file))
+    _write_key_adequacy_report(tmp_path, "sub1", [
+        ("T1", "PK_MATCH_EXACT"),
+        ("T2", "PK_REVIEW_REQUIRED"),
+    ])
+
+    details, total_score, rev_count, _err_count = score_submission(
+        "sub1", "OK", tmp_path, config, _pk_rubric_row(), [], {"primary_keys": []}
+    )
+
+    assert total_score == pytest.approx(0.5)
+    assert details[0]["review_required"] is True
+    assert rev_count == 1
+
+
+def test_primary_key_no_items_only_when_no_report_or_snapshot_source(tmp_path, mock_config_file):
+    config = load_config(str(mock_config_file))
+    (tmp_path / "submissions" / "sub1" / "reports").mkdir(parents=True, exist_ok=True)
+
+    details, total_score, _rev_count, _err_count = score_submission(
+        "sub1", "OK", tmp_path, config, _pk_rubric_row(), [], {"primary_keys": []}
+    )
+
+    assert total_score == 0.0
+    assert details[0]["status"] == "NO_ITEMS"
+
+
+def test_primary_key_answer_snapshot_fallback_produces_expected_items(tmp_path, mock_config_file):
+    config = load_config(str(mock_config_file))
+    snap_dir = tmp_path / "answer_snapshot"
+    snap_dir.mkdir(parents=True)
+    with open(snap_dir / "primary_keys.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["table_name", "column_name"])
+        writer.writeheader()
+        writer.writerow({"table_name": "T1", "column_name": "Id"})
+        writer.writerow({"table_name": "T2", "column_name": "Id"})
+    answer_items = get_answer_atomic_items(tmp_path, config)
+
+    reports_dir = tmp_path / "submissions" / "sub1" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    details, total_score, _rev_count, _err_count = score_submission(
+        "sub1", "OK", tmp_path, config, _pk_rubric_row(), [], answer_items
+    )
+
+    assert answer_items["primary_keys"] == ["T1", "T2"]
+    assert total_score == 0.0
+    assert details[0]["status"] == "T1:MISSING,T2:MISSING"
+    assert details[0]["message"] == "Passed 0/2 items"
+
+
 def test_scoring_handles_blank_view_numeric_fields(tmp_path, mock_config_file):
     run_dir = tmp_path
     config = load_config(str(mock_config_file))

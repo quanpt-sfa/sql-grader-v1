@@ -90,3 +90,33 @@ def test_compile_summary_various_statuses(tmp_path):
     assert int(s3["view_required_count"]) == 2
     assert int(s3["view_pass_count"]) == 2
     assert s3["view_test_status"] == "OK"
+
+
+def test_compile_summary_counts_distinct_required_views(tmp_path):
+    run_dir = tmp_path
+    with open(run_dir / "manifest.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["submission_id", "status", "error_message"])
+        writer.writeheader()
+        writer.writerow({"submission_id": "sub1", "status": "OK", "error_message": ""})
+
+    reports_dir = run_dir / "submissions" / "sub1" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    with open(reports_dir / "structure_report.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["component", "answer_object", "status"])
+        writer.writeheader()
+        writer.writerow({"component": "view", "answer_object": "Cau1", "status": "MISSING"})
+        writer.writerow({"component": "view", "answer_object": "Cau2", "status": "MISSING"})
+        writer.writerow({"component": "view", "answer_object": "Cau3", "status": "MISSING"})
+    with open(reports_dir / "view_test_report.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["submission_id", "answer_view", "student_view", "status"])
+        writer.writeheader()
+        for answer_view in ("Cau1", "Cau2", "Cau3"):
+            writer.writerow({"submission_id": "sub1", "answer_view": answer_view, "student_view": "candidate_a", "status": "VIEW_NO_MATCHING_OUTPUT"})
+            writer.writerow({"submission_id": "sub1", "answer_view": answer_view, "student_view": "candidate_b", "status": "VIEW_NO_MATCHING_OUTPUT"})
+
+    summary_path = compile_summary(run_dir)
+    with open(summary_path, "r", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    assert int(rows[0]["view_required_count"]) == 3
+    assert int(rows[0]["view_expected_count"]) == 3

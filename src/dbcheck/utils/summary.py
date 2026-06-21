@@ -300,10 +300,17 @@ def compile_summary(run_dir: Path) -> Path:
         if view_report.exists():
             try:
                 statuses = []
+                required_views_seen = set()
+                row["view_required_count"] = 0
+                row["view_expected_count"] = 0
                 with open(view_report, "r", encoding="utf-8") as vf:
                     for v_row in csv.DictReader(vf):
-                        row["view_required_count"] += 1
-                        row["view_expected_count"] += 1
+                        answer_view = v_row.get("answer_view", "")
+                        view_key = answer_view.strip().lower()
+                        if view_key and view_key not in required_views_seen:
+                            required_views_seen.add(view_key)
+                            row["view_required_count"] += 1
+                            row["view_expected_count"] += 1
                         v_status = v_row["status"].upper()
                         statuses.append(v_status)
                         
