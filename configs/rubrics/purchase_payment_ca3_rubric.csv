@@ -1,10 +1,9 @@
 section,component,scope,object_name,total_points,scoring_mode,include_statuses,partial_policy,notes
-A.1,tables,all,,1.0,proportional,TABLE_MATCHED_EXACT|TABLE_MATCHED_ALIAS|TABLE_MATCHED_ABBREVIATION|TABLE_MATCHED_FUZZY_HIGH|TABLE_MATCHED_WEAK_ALIAS,review_pending,Proportional tables mapping points
-A.1,columns,all,,2.0,proportional,COLUMN_MATCHED_EXACT|COLUMN_MATCHED_ALIAS|COLUMN_MATCHED_ABBREVIATION|COLUMN_MATCHED_WEAK_ALIAS,review_pending,Proportional columns mapping points
-A.1,primary_keys,all,,1.0,proportional,PK_MATCH_EXACT|PK_MATCH_ALIAS_EQUIVALENT|PK_SURROGATE_ACCEPTED|PK_NATURAL_ACCEPTED,review_pending,Proportional primary keys points
-A.2,foreign_keys,all,,1.0,proportional,FK_MATCH_EXACT|FK_ALIAS_EQUIVALENT|FK_SURROGATE_ACCEPTED|FK_NATURAL_ACCEPTED,review_pending,Proportional foreign keys points
-A.3,row_counts,all,,1.0,proportional,PASS,review_pending,Proportional row count check points
-B,views,Cau1,,0.5,weighted_subchecks,VIEW_PASS|VIEW_OUTPUT_MATCH,partial_view,Weighted view check points for Cau1
-B,views,Cau2,,0.5,weighted_subchecks,VIEW_PASS|VIEW_OUTPUT_MATCH,partial_view,Weighted view check points for Cau2
-B,views,Cau3,,2.0,weighted_subchecks,VIEW_PASS|VIEW_OUTPUT_MATCH,partial_view,Weighted view check points for Cau3
-C,manual,PartC,,1.0,manual,,,Optional manual grading section
+A.1,tables,all,,2,proportional,TABLE_MATCHED_EXACT|TABLE_MATCHED_ALIAS|TABLE_MATCHED_ABBREVIATION|TABLE_MATCHED_FUZZY_HIGH|TABLE_MATCHED_WEAK_ALIAS,review_pending,Proportional tables mapping points
+A.1,columns,all,,2,proportional,COLUMN_MATCHED_EXACT|COLUMN_MATCHED_ALIAS|COLUMN_MATCHED_ABBREVIATION|COLUMN_MATCHED_WEAK_ALIAS,review_pending,Proportional columns mapping points
+A.1,primary_keys,all,,1,proportional,PK_MATCH_EXACT|PK_MATCH_ALIAS_EQUIVALENT|PK_SURROGATE_ACCEPTED|PK_NATURAL_ACCEPTED,review_pending,Proportional primary keys points
+A.2,foreign_keys,all,,1,proportional,FK_MATCH_EXACT|FK_ALIAS_EQUIVALENT|FK_SURROGATE_ACCEPTED|FK_NATURAL_ACCEPTED,review_pending,Proportional foreign keys points
+A.3,row_counts,all,,1,proportional,PASS,review_pending,Proportional row count check points
+B,views,Cau1,,1,weighted_subchecks,VIEW_PASS|VIEW_OUTPUT_MATCH,partial_view,Weighted view check points for Cau1
+B,views,Cau2,,1,weighted_subchecks,VIEW_PASS|VIEW_OUTPUT_MATCH,partial_view,Weighted view check points for Cau2
+B,views,Cau3,,1,weighted_subchecks,VIEW_PASS|VIEW_OUTPUT_MATCH,partial_view,Weighted view check points for Cau3

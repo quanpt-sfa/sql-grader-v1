@@ -9,35 +9,35 @@ schema:
     allow_natural_keys: true
     require_business_key_uniqueness: false
     surrogate_key_patterns:
-      - id
-      - "{table}id"
-      - "{table}_id"
+    - id
+    - "{table}id"
+    - "{table}_id"
     natural_key_aliases:
       HangHoa:
-        MaHangHoa: [MaHang, MaHTK]
+        MaHangHoa: [MaHang, MaHTK, MaHH, MAHH, mahh, MaH, MH, Ma_HH, Ma HH, Mã HH, ProID, PROID, MaSP, MASP, MaSanPham]
       LoaiTien:
-        MaLoaiTien: [MaTien, LoaiTien]
+        MaLoaiTien: [MaTien, LoaiTien, MaLT, maLT, MALT, MLT, MA_LT, MA LT, LT, LTT, MaTT, MTT, LoaiTT, PTTT, TienID, TIENID]
       NhanVien:
-        MaNhanVien: [MaNV]
+        MaNhanVien: [MaNV, MNV, mNV, MaNVien, EmpID, EMPID, EmployeeID, StaffID]
       NhaCungCap:
-        MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap]
+        MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap, MNCC, MANCC, NCCID, SupplierID, VendorID, MaNhaCC]
       MuaHang:
-        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD]
+        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD, SoPNK, sopnk, soPNK, So PNK, PNK, PhieuNK, PhieuNhapKho, SHD, shd, SoPhieu, sophieu, PMHang, MA_MH, SoPMH, SoPhieuMH, HoaDonMua]
       TraTien:
-        SoPhieuTraTien: [PC, SoPC, PhieuChi, SoPhieuChi]
+        SoPhieuTraTien: [PC, SoPC, PhieuChi, SoPhieuChi, PTT, ptt, SPT, SPC, PhieuTT, PHIEU_TT, SPTra, SPtra, sptra, SPChi, ptratien, SoPTT, SoPhieuTT]
       ChiTietMuaHang:
-        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD]
-        MaHangHoa: [MaHang, MaHTK]
+        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD, SoPNK, sopnk, soPNK, So PNK, PNK, PhieuNK, PhieuNhapKho, SHD, shd, SoPhieu, sophieu, PMHang, SoPMH, SoPhieuMH, HoaDonMua]
+        MaHangHoa: [MaHang, MaHTK, MH, MaH, MaHH, MAHH, mahh, ProID, PROID, MaSP, MASP, MaSanPham]
       ChiTietTraTien:
-        SoPhieuTraTien: [PC, SoPC, PhieuChi, SoPhieuChi]
-        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD]
-        MaLoaiTien: [MaTien, LoaiTien]
+        SoPhieuTraTien: [PC, SoPC, PhieuChi, SoPhieuChi, PTT, ptt, SPT, SPC, PhieuTT, PHIEU_TT, SPTra, SPtra, sptra, SPChi, ptratien, SoPTT, SoPhieuTT]
+        PhieuMuaHang: [PMH, PhieuMH, SoHoaDon, MaHD, SoPNK, sopnk, soPNK, So PNK, PNK, PhieuNhapKho, PhieuNK, SHD, shd, PMHang, SoPMH, SoPhieuMH, HoaDonMua]
+        MaLoaiTien: [MaTien, LoaiTien, MaLT, maLT, MALT, MLT, MaTT, MTT, LT, LTT, TIENID, TienID, LoaiTT, PTTT]
 
   matching_threshold: 0.8
   excluded_tables:
-    - sysdiagrams
-    - Stage_MuaHang
-    - Stage_TraTien
+  - sysdiagrams
+  - Stage_MuaHang
+  - Stage_TraTien
   type_compatibility:
     mode: group_with_warnings
     compatible_warning_score: 0.75
@@ -48,7 +48,7 @@ schema:
     strict_length_check: false
     strict_precision_scale_check: false
     identifier_columns:
-      global: ["SoPhieuTraTien", "PhieuMuaHang", "SoHoaDon", "PC", "PMH", "SoHD", "HoaDon", "PhieuChi", "SoPhieuChi", "SoPC", "SoPMH"]
+      global: ["SoPhieuTraTien", "PhieuMuaHang", "SoHoaDon", "PC", "PMH", "SoHD", "HoaDon", "PhieuChi", "SoPhieuChi", "SoPC", "SoPMH", SoPNK, PNK, PhieuNhapKho, PhieuNK, SHD, PMHang, MA_MH, PTT, SPT, SPC, PhieuTT, SPTra, SPChi, MaHH, MAHH, MaH, MH, MaLT, MALT, MLT, LTT, LT, MaTT, PTTT, MNV, MNCC, NCCID, SupplierID, VendorID, EmpID, EmployeeID]
 
   abbreviations:
     ncc: NhaCungCap
@@ -60,55 +60,73 @@ schema:
     pc: PhieuChi
 
 
+    hh: HangHoa
+    mah: MaHangHoa
+    mahh: MaHangHoa
+    lt: LoaiTien
+    ltt: LoaiTien
+    pttt: LoaiTien
+    mnv: MaNhanVien
+    mncc: MaNhaCungCap
+    pnk: PhieuMuaHang
+    sopnk: PhieuMuaHang
+    ptt: SoPhieuTraTien
+    spt: SoPhieuTraTien
+    spc: SoPhieuTraTien
+    ctmh: ChiTietMuaHang
+    cttt: ChiTietTraTien
+    ctct: ChiTietTraTien
   aliases:
     tables:
-      HangHoa: [Hang, HangTonKho, HTK, Product, Inventory, "01. HTK", "01.HangTonKho", "01. HTK (Hang hoa)", "01. HangTonKho", "Hàng Hóa", "Hàng hóa", "HangHoa", "Hang Hoa", "Hanghoa"]
-      LoaiTien: [Tien, LoaiTien, Currency, Money, "02.Tien", "02.TIEN", "02. LoaiTien"]
-      NhanVien: [NhanVien, NV, Employee, "03.NhanVien", "03. NhanVien"]
-      NhaCungCap: [NCC, NhaCungCap, NguoiCungCap, NguoiBan, Supplier, Vendor, NB, "04. NCC", "04.NCC", "04. NhaCungCap"]
-      MuaHang: [MuaHang, Muahangg, PhieuMuaHang, PMH, Purchase, PurchaseInvoice, "05.MUAHANG", "05.Muahangg", "05. MuaHang", HD, HoaDon, SoHoaDon]
-      ChiTietMuaHang: [ChiTietMuaHang, CT_MuaHang, CTMuaHang, PurchaseDetail, "06. CT_MUAHANG", "06.CT_MuaHang", "06. ChiTietMuaHang"]
-      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien", "ThanhToan", "Thanh Toán"]
-      ChiTietTraTien: [ChiTietTraTien, CT_ChiTien, CTChiTien, PaymentDetail, "08.CT_CHITIEN", "08.CT_ChiTien", "08. ChiTietTraTien", "CTCT", "ctct"]
+      HangHoa: [Hang, HangTonKho, HTK, Product, Inventory, "01. HTK", "01.HangTonKho", "01. HTK (Hang hoa)", "01. HangTonKho", "Hàng Hóa", "Hàng hóa", "HangHoa", "Hang Hoa", "Hanghoa", 1.HTK, 1. HTK, 01.HTK, 01 HTK, HANGTONKHO, Hàng tồn kho, Hang ton kho, HTKho, KhoHang, Kho hàng]
+      LoaiTien: [Tien, LoaiTien, Currency, Money, "02.Tien", "02.TIEN", "02. LoaiTien", 2.TIEN, 2 Tiền, 2 TIỀN, 02.LOAITIEN, 02 LOAITIEN, TIEN, TienTe, Tiền tệ, LoaiThanhToan, HinhThucThanhToan, PhuongThucThanhToan]
+      NhanVien: [NhanVien, NV, Employee, "03.NhanVien", "03. NhanVien", 4.NV, 4. NV, 04.NhanVien, 04 NhanVien, NHANVIEN, Nhan vien, Employees, NVien]
+      NhaCungCap: [NCC, NhaCungCap, NguoiCungCap, NguoiBan, Supplier, Vendor, NB, "04. NCC", "04.NCC", "04. NhaCungCap", 3.NCC, 3. NCC, 03.NhaCungCap, 03 NCC, NHACUNGCAP, Nha CC, Nhà CC, NCCap, NguoiCC, NhaCungUng]
+      MuaHang: [MuaHang, Muahangg, PhieuMuaHang, PMH, Purchase, PurchaseInvoice, "05.MUAHANG", "05.Muahangg", "05. MuaHang", HD, HoaDon, SoHoaDon, 5. Mua hàng, 5.MuaHang, 6.MUA HÀNG, mua hàng, Mua hàng, MUAHANG, Muahang, Mua_Hang, PhieuNhapKho, PhieuNK, NhapKho, PNK, HoaDonMua, HoaDonMuaHang, HDMuaHang, PhieuMua, DonMuaHang]
+      ChiTietMuaHang: [ChiTietMuaHang, CT_MuaHang, CTMuaHang, PurchaseDetail, "06. CT_MUAHANG", "06.CT_MuaHang", "06. ChiTietMuaHang", CTMH, ctmh, 7.CTMH, 7. CTMH, CT MuaHang, CT-Muahang, CT_MH, CHITIETMUAHANG, ChiTietMH, CTPhieuNhapKho, ChiTietNhapKho, CTPNK, CT_HoaDonMua, ChiTietHoaDonMua]
+      TraTien: [TraTien, ChiTien, PhieuChi, PC, Payment, "07. CHITIEN", "07.ChiTien", "07. TraTien", "ThanhToan", "Thanh Toán", 5.TRẢ TIỀN, 5. Trả tiền, 6.TraTien, 6.tratien, 06.ChiTien, chitien, TRATIEN, Tratien, Tra_Tien, ThanhToanNCC, PhieuTraTien, PhieuTT, PTT, PhieuChiNCC]
+      ChiTietTraTien: [ChiTietTraTien, CT_ChiTien, CTChiTien, PaymentDetail, "08.CT_CHITIEN", "08.CT_ChiTien", "08. ChiTietTraTien", "CTCT", "ctct", 8.CTCT, 8. CTCT, CT-Tratien, CT_TraTien, CTTT, CTThanhToan, ChiTietThanhToan, CHITIETTRATIEN, ChiTietTT, CTPhieuChi, ChiTietPhieuChi, CTPTT]
     columns:
       global: {}
       by_table:
         HangHoa:
-          MaHangHoa: [MaHang, MaHTK, ProductID]
-          TenHangHoa: [TenHang, TenHTK, ProductName, HangHoa, "Hàng Hóa", "Tên hàng hóa", "Sản phẩm"]
-          DonViTinh: [DVT, ĐVT, DonViTinh, "Đơn vị tính"]
+          MaHangHoa: [MaHang, MaHTK, ProductID, MaHH, MAHH, mahh, MaH, MH, Ma_HH, Ma HH, Mã HH, ProID, PROID, ProductCode, InventoryID, MaSP, MASP, MaSanPham, Mã hàng, Mã hàng hóa]
+          TenHangHoa: [TenHang, TenHTK, ProductName, HangHoa, "Hàng Hóa", "Tên hàng hóa", "Sản phẩm", TenHH, TENHH, tenhh, TenH, Tên hàng, Tên hàng hoá, SanPham, Product, TenSP, TenSanPham]
+          DonViTinh: [DVT, ĐVT, DonViTinh, "Đơn vị tính", DVTinh, DonVi, Đơn vị, Unit, UnitName, UOM]
         LoaiTien:
-          MaLoaiTien: [MaTien, LoaiTien, CurrencyID]
-          TenLoaiTien: [TenTien, TenLoaiTien, CurrencyName, tenlt, "Tên loại tiền"]
+          MaLoaiTien: [MaTien, LoaiTien, CurrencyID, MaLT, maLT, MALT, MLT, MA_LT, MA LT, LT, LTT, MaTT, MTT, MaT, LoaiTT, LOAITT, loaitt, PTTT, TienID, TIENID, MaTienTe, MaLoaiThanhToan, MaHinhThucThanhToan, MaPhuongThucThanhToan]
+          TenLoaiTien: [TenTien, TenLoaiTien, CurrencyName, tenlt, "Tên loại tiền", TenLoaiThanhToan, TenHinhThucThanhToan, TenPhuongThucThanhToan, HinhThucThanhToan, PhuongThucThanhToan, LoaiThanhToan, LoaiTen, Ten, TenTienTe, TenTT, TenLT, PaymentMethod]
         NhaCungCap:
-          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap, SupplierID, VendorID]
-          TenNhaCungCap: [TenNCC, TenNB, TenNguoiBan, TenNguoiCungCap, SupplierName, VendorName, "Nhà cung cấp"]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, MaNguoiCungCap, SupplierID, VendorID, MNCC, MANCC, NCCID, SupplierCode, MaNhaCC, MaNguoiCC, MaNhaCungUng]
+          TenNhaCungCap: [TenNCC, TenNB, TenNguoiBan, TenNguoiCungCap, SupplierName, VendorName, "Nhà cung cấp", NCC, NhaCungCap, Nhacungcap, Nhà CC, Nha CC, Tenncc, TenNhaCC, Supplier]
+          DiaChi: [DiaChiNCC, DiaChiNB, DiaChiNhaCC, Địa chỉ NCC, Address, SupplierAddress, DChi]
+          KhuVuc: [KV, Khu vuc, Khu vực, Area, Region, KhuVucNCC, KhuVucNB]
         MuaHang:
-          PhieuMuaHang: [PMH, MaHD, SoHoaDon, HoaDon, InvoiceNo, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD]
-          NgayMuaHang: [Ngay, NgayMH, PurchaseDate]
-          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, NCC, "Nhà cung cấp", "Mã CC"]
-          MaNhanVien: [MaNV, NV, "Nhân viên", "NV mua hàng"]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, HoaDon, InvoiceNo, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD, SoPNK, sopnk, soPNK, So PNK, PNK, PhieuNK, phieuNK, PhieuNk, PhieuNhapKho, phieunhapkho, SHD, shd, SoPhieu, sophieu, PMHang, MA_MH, SoPhieuMH, SoPhieuMua, MaPhieuMua, HoaDonMua, SoHoaDonMua]
+          NgayMuaHang: [Ngay, NgayMH, PurchaseDate, NgayMua, NgayNhap, NgayNhapKho, NgayHD, NgayHoaDon]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, NCC, "Nhà cung cấp", "Mã CC", MNCC, MANCC, MaNguoiCungCap, NCCID, SupplierID, VendorID]
+          MaNhanVien: [MaNV, NV, "Nhân viên", "NV mua hàng", MNV, NhanVien, NhanVienMuaHang, EmployeeID, EmpID]
           MaLoaiTien: [LoaiTien, MaTien]
         ChiTietMuaHang:
-          PhieuMuaHang: [PMH, MaHD, SoHoaDon, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD]
-          MaHangHoa: [MaHang, MaHTK, HangHoa, "Hàng Hóa", TenHangHoa, TenHang, "Sản phẩm"]
-          SoLuong: [SL, Quantity, Qty]
-          DonGia: [Gia, UnitPrice]
-          TienThue: [Thue, Tax]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD, SoPNK, sopnk, soPNK, So PNK, PNK, PhieuNK, phieuNK, PhieuNk, PhieuNhapKho, phieunhapkho, SHD, shd, SoPhieu, sophieu, PMHang, SoPhieuMH, SoPhieuMua, MaPhieuMua, HoaDonMua, SoHoaDonMua]
+          MaHangHoa: [MaHang, MaHTK, HangHoa, "Hàng Hóa", TenHangHoa, TenHang, "Sản phẩm", MH, MaH, MaHH, MAHH, mahh, ProID, PROID, ProductID, MaSP, MASP, MaSanPham]
+          SoLuong: [SL, Quantity, Qty, SLuong, SoLuongMua, Soluong, Số lượng, QTY]
+          DonGia: [Gia, UnitPrice, GiaMua, DonGiaMua, Đơn giá, Price, GiaNhap]
+          TienThue: [Thue, Tax, ThueGTGT, VAT, TienVAT, Tiền thuế, TienThueGTGT]
         TraTien:
-          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC, SoPTT, SoPhieuTra, sophieutra]
-          NgayTra: [Ngay, NgayChi, PaymentDate]
-          MaNhanVien: [MaNV, NV, "Nhân viên", "NV mua hàng"]
-          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, NCC, "Nhà cung cấp", "Mã CC"]
-          MaLoaiTien: [LoaiTien, MaTien]
+          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC, SoPTT, SoPhieuTra, sophieutra, PTT, ptt, SPT, SPC, PhieuTT, PHIEU_TT, SPTra, SPtra, sptra, SPChi, ptratien, SoPhieuTT, MaPhieuTra]
+          NgayTra: [Ngay, NgayChi, PaymentDate, NgayTraTien, Ngày trả tiền, Ngaytratien, NgayTT, NgayThanhToan, NgayPC]
+          MaNhanVien: [MaNV, NV, "Nhân viên", "NV mua hàng", MNV, NhanVien, NhanVienTraTien, NV trả tiền, EmployeeID, EmpID]
+          MaNhaCungCap: [MaNCC, MaNB, MaNguoiBan, NCC, "Nhà cung cấp", "Mã CC", MNCC, MANCC, MaNguoiCungCap, NCCID, SupplierID, VendorID]
+          MaLoaiTien: [LoaiTien, MaTien, MaLT, maLT, MALT, MLT, MaTT, MTT, LT, LTT, LoaiTT, PTTT, TienID, TIENID]
         ChiTietTraTien:
-          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC, SoPTT, SoPhieuTra, sophieutra]
-          PhieuMuaHang: [PMH, MaHD, SoHoaDon, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD]
-          MaLoaiTien: [LoaiTien, MaTien, LoaiTT, LoaiThanhToan, HinhThucThanhToan, PhuongThucThanhToan, ThanhToan, "Thanh Toán", tenlt]
-          SoTienTra: [SoTien, TienTra, AmountPaid, TongTienTra, TongTien]
+          SoPhieuTraTien: [PC, PhieuChi, SoPhieuChi, SoPC, SoPTT, SoPhieuTra, sophieutra, PTT, ptt, SPT, SPC, PhieuTT, PHIEU_TT, SPTra, SPtra, sptra, SPChi, ptratien, SoPhieuTT, MaPhieuTra]
+          PhieuMuaHang: [PMH, MaHD, SoHoaDon, SoPMH, SoPhieuMuaHang, "Phiếu mua hàng", SoHD, SOHD, SoPNK, sopnk, soPNK, So PNK, PNK, PhieuNhapKho, phieunhapkho, PhieuNK, SHD, shd, PMHang, SoPhieuMH, SoPhieuMua, MaPhieuMua, HoaDonMua, SoHoaDonMua]
+          MaLoaiTien: [LoaiTien, MaTien, LoaiTT, LoaiThanhToan, HinhThucThanhToan, PhuongThucThanhToan, ThanhToan, "Thanh Toán", tenlt, MaLT, maLT, MALT, MLT, MaTT, MTT, LT, LTT, TIENID, TienID, PTTT, MaLoaiThanhToan]
+          SoTienTra: [SoTien, TienTra, AmountPaid, TongTienTra, TongTien, TienThanhToan, SoTienThanhToan, TienChi, ThanhToan]
         NhanVien:
-          MaNhanVien: [MaNV]
-          TenNhanVien: [TenNV, EmployeeName, NhanVien, "Nhân viên"]
+          MaNhanVien: [MaNV, MNV, mNV, MaNVien, NV_ID, EmpID, EMPID, EmployeeID, StaffID, MaNS]
+          TenNhanVien: [TenNV, EmployeeName, NhanVien, "Nhân viên", TenNVien, HoTenNV, HoTen, NhanVienMuaHang, NV mua hàng, Nhân viên mua hàng, Employee, StaffName]
 
 views:
   mode: answer_snapshot
@@ -124,68 +142,68 @@ views:
     allow_weak_table_aliases: false
     max_execution_seconds: 10
   expected:
-    - answer_view: "Cau1"
-      answer_required: true
-      student_required: true
-      check_mode: "full"
-      order_sensitive: false
-      expected_output:
-        columns:
-          - canonical: "TenNhaCungCap"
-            type: "text"
-            aliases: ["Tên nhà cung cấp", "TenNhaCungCap", "TenNCC", "Tên NCC"]
-          - canonical: "DiaChi"
-            type: "text"
-            aliases: ["Địa chỉ", "DiaChi"]
-          - canonical: "KhuVuc"
-            type: "text"
-            aliases: ["Khu vực", "Khu Vực", "KhuVuc"]
-        sort_by: ["TenNhaCungCap"]
-        numeric_tolerance: 0.01
+  - answer_view: "Cau1"
+    answer_required: true
+    student_required: true
+    check_mode: "full"
+    order_sensitive: false
+    expected_output:
+      columns:
+      - canonical: "TenNhaCungCap"
+        type: "text"
+        aliases: ["Tên nhà cung cấp", "TenNhaCungCap", "TenNCC", "Tên NCC", NCC, NhaCungCap, Nhà cung cấp, Supplier, SupplierName, VendorName]
+      - canonical: "DiaChi"
+        type: "text"
+        aliases: ["Địa chỉ", "DiaChi", DiaChiNCC, Địa chỉ NCC, Address, SupplierAddress, DChi]
+      - canonical: "KhuVuc"
+        type: "text"
+        aliases: ["Khu vực", "Khu Vực", "KhuVuc", KV, Khu vuc, Area, Region, KhuVucNCC]
+      sort_by: ["TenNhaCungCap"]
+      numeric_tolerance: 0.01
 
-    - answer_view: "Cau2"
-      answer_required: true
-      student_required: true
-      check_mode: "full"
-      order_sensitive: true
-      expected_output:
-        columns:
-          - canonical: "TenHangHoa"
-            type: "text"
-            aliases: ["Sản phẩm", "TenHangHoa", "TenHang"]
-          - canonical: "DonViTinh"
-            type: "text"
-            aliases: ["Đơn vị tính", "DonViTinh", "DVT"]
-          - canonical: "SoLuong"
-            type: "number"
-            aliases: ["Tổng số lượng", "SoLuong", "SL", "TongSoLuong"]
-        sort_by: ["SoLuong"]
-        numeric_tolerance: 0.01
+  - answer_view: "Cau2"
+    answer_required: true
+    student_required: true
+    check_mode: "full"
+    order_sensitive: true
+    expected_output:
+      columns:
+      - canonical: "TenHangHoa"
+        type: "text"
+        aliases: ["Sản phẩm", "TenHangHoa", "TenHang", HangHoa, Tên hàng, SanPham, Product, ProductName, TenSP]
+      - canonical: "DonViTinh"
+        type: "text"
+        aliases: ["Đơn vị tính", "DonViTinh", "DVT", ĐVT, DonVi, Đơn vị, Unit, UOM]
+      - canonical: "SoLuong"
+        type: "number"
+        aliases: ["Tổng số lượng", "SoLuong", "SL", "TongSoLuong", TongSL, Tổng SL, SoLuongMua, Số lượng, Quantity, Qty]
+      sort_by: ["SoLuong"]
+      numeric_tolerance: 0.01
 
-    - answer_view: "Cau3"
-      answer_required: true
-      student_required: true
-      check_mode: "full"
-      order_sensitive: false
-      expected_output:
-        columns:
-          - canonical: "TenNhaCungCap"
-            type: "text"
-            aliases: ["Tên Nhà cung cấp", "Tên nhà cung cấp", "TenNhaCungCap", "TenNCC"]
-          - canonical: "KhuVuc"
-            type: "text"
-            aliases: ["Khu vực", "Khu Vực", "KhuVuc"]
-          - canonical: "NoPhaiTra"
-            type: "number"
-            aliases: ["Nợ phải trả", "PhaiTra", "NoPhaiTra"]
-          - canonical: "NoDaTra"
-            type: "number"
-            aliases: ["Nợ đã trả", "DaTra", "NoDaTra"]
-          - canonical: "ConLai"
-            type: "number"
-            aliases: ["Còn lại", "ConLai"]
-        sort_by: ["TenNhaCungCap"]
-        numeric_tolerance: 0.01
+  - answer_view: "Cau3"
+    answer_required: true
+    student_required: true
+    check_mode: "full"
+    order_sensitive: false
+    expected_output:
+      columns:
+      - canonical: "TenNhaCungCap"
+        type: "text"
+        aliases: ["Tên Nhà cung cấp", "Tên nhà cung cấp", "TenNhaCungCap", "TenNCC", NCC, NhaCungCap, Nhà cung cấp, Supplier, SupplierName, VendorName]
+      - canonical: "KhuVuc"
+        type: "text"
+        aliases: ["Khu vực", "Khu Vực", "KhuVuc", KV, Khu vuc, Area, Region, KhuVucNCC]
+      - canonical: "NoPhaiTra"
+        type: "number"
+        aliases: ["Nợ phải trả", "PhaiTra", "NoPhaiTra", NoPT, TongMua, TongTienMua, TongPhaiTra, Nợ PT]
+      - canonical: "NoDaTra"
+        type: "number"
+        aliases: ["Nợ đã trả", "DaTra", "NoDaTra", TongTra, TongTienTra, TongDaTra, Đã trả]
+      - canonical: "ConLai"
+        type: "number"
+        aliases: ["Còn lại", "ConLai", ConNo, NoConLai, SoConLai, Còn nợ]
+      sort_by: ["TenNhaCungCap"]
+      numeric_tolerance: 0.01
 
 scoring:
   rubric_path: "configs/rubrics/purchase_payment_ca3_rubric.csv"
